@@ -100,7 +100,14 @@ xf86DeleteDriver(int drvIndex)
         if (xf86DriverList[drvIndex]->module)
             UnloadModule(xf86DriverList[drvIndex]->module);
         free(xf86DriverList[drvIndex]);
-        xf86DriverList[drvIndex] = NULL;
+
+        /* Compact xf86DriverList array, update xf86NumDrivers */
+        xf86NumDrivers--;
+        if(drvIndex != xf86NumDrivers)
+            memmove(xf86DriverList + drvIndex,
+                    xf86DriverList + drvIndex + 1,
+                    sizeof(DriverPtr) * (xf86NumDrivers - drvIndex));
+        xf86DriverList = realloc(xf86DriverList, xf86NumDrivers * sizeof(DriverPtr));
     }
 }
 
@@ -1597,7 +1604,13 @@ xf86LoadOneModule(char *name, pointer opt)
 void
 xf86UnloadSubModule(pointer mod)
 {
+    /*
+     * This is disabled for now.  The loader isn't smart enough yet to undo
+     * relocations.
+     */
+#if 0
     UnloadSubModule(mod);
+#endif
 }
 
 Bool

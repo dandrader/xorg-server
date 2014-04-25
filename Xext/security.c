@@ -262,9 +262,9 @@ SecurityComputeAuthorizationTimeout(SecurityAuthorizationPtr pAuth,
     /* maxSecs is the number of full seconds that can be expressed in
      * 32 bits worth of milliseconds
      */
-    CARD32 maxSecs = (CARD32) (~0) / (CARD32) MILLI_PER_SECOND;
+    CARD32 maxSecs = (CARD32) (MAXINT) / (CARD32) MILLI_PER_SECOND;
 
-    if (seconds > maxSecs) {    /* only come here if we want to wait more than 49 days */
+    if (seconds > maxSecs) {    /* only come here if we want to wait more than 24 days */
         pAuth->secondsRemaining = seconds - maxSecs;
         return maxSecs * MILLI_PER_SECOND;
     }
@@ -297,8 +297,6 @@ static CARD32
 SecurityAuthorizationExpired(OsTimerPtr timer, CARD32 time, pointer pval)
 {
     SecurityAuthorizationPtr pAuth = (SecurityAuthorizationPtr) pval;
-
-    assert(pAuth->timer == timer);
 
     if (pAuth->secondsRemaining) {
         return SecurityComputeAuthorizationTimeout(pAuth,

@@ -361,6 +361,16 @@ xf86CreateRootWindow(WindowPtr pWin)
     return ret;
 }
 
+extern void xf86AutoConfigOutputDevice(ScrnInfoPtr pScrn, ScrnInfoPtr master);                              
+static void
+xf86AutoConfigOutputDevices(void)
+{
+    int i;
+
+    for (i = 0; i < xf86NumGPUScreens; i++)
+        xf86AutoConfigOutputDevice(xf86GPUScreens[i], xf86Screens[0]);
+}
+
 static void
 InstallSignalHandlers(void)
 {
@@ -482,20 +492,34 @@ InitOutput(ScreenInfo * pScreenInfo, int argc, char **argv)
             free(optionlist);
         }
 
+ Fallback:
         /* Load all driver modules specified in the config file */
         /* If there aren't any specified in the config file, autoconfig them */
         /* FIXME: Does not handle multiple active screen sections, but I'm not
          * sure if we really want to handle that case*/
         configured_device = xf86ConfigLayout.screens->screen->device;
-        if ((!configured_device) || (!configured_device->driver)) {
+        if (xf86AttemptedFallback) {
+            configured_device->driver = NULL;
+            if (!autoConfigDevice(configured_device)) {
+                xf86Msg(X_ERROR, "Auto configuration on fallback failed\n");
+                return;
+            }
+        }
+        else if ((!configured_device) || (!configured_device->driver)) {
             if (!autoConfigDevice(configured_device)) {
                 xf86Msg(X_ERROR, "Automatic driver configuration failed\n");
                 return;
             }
         }
         if ((modulelist = xf86DriverlistFromConfig())) {
-            xf86LoadModules(modulelist, NULL);
-            free(modulelist);
+            if (!xf86LoadModules(modulelist, NULL) && !xf86AttemptedFallback) {
+                free(modulelist);
+                xf86AttemptedFallback = TRUE;
+                goto Fallback;
+            }
+            else {
+                free(modulelist);
+            }
         }
 
         /* Load all input driver modules specified in the config file. */
@@ -530,7 +554,7 @@ InitOutput(ScreenInfo * pScreenInfo, int argc, char **argv)
          * needed at this early stage.
          */
 
-        for (i = 0; i < xf86NumDrivers; i++) {
+        for (i = 0; i < xf86NumDrivers; ) {
             xorgHWFlags flags = HW_IO;
 
             if (xf86DriverList[i]->Identify != NULL)
@@ -541,11 +565,20 @@ InitOutput(ScreenInfo * pScreenInfo, int argc, char **argv)
                                               GET_REQUIRED_HW_INTERFACES,
                                               &flags);
 
+            if (xorgMir &&
+                (NEED_IO_ENABLED(flags) || !(flags & HW_SKIP_CONSOLE))) {
+                ErrorF("Driver needs flags %lu, incompatible with nested, deleting.\n", flags);
+                xf86DeleteDriver(i);
+                continue;
+            }
+
             if (NEED_IO_ENABLED(flags))
                 want_hw_access = TRUE;
 
             if (!(flags & HW_SKIP_CONSOLE))
                 xorgHWOpenConsole = TRUE;
+
+            i++;
         }
 
         if (xorgHWOpenConsole)
@@ -557,8 +590,15 @@ InitOutput(ScreenInfo * pScreenInfo, int argc, char **argv)
 	if (want_hw_access)
 	    xorgHWAccess = xf86EnableIO();
 
-        if (xf86BusConfig() == FALSE)
-            return;
+        if (xf86BusConfig() == FALSE) {
+            if (!xf86AttemptedFallback) {
+                xf86AttemptedFallback = TRUE;
+                goto Fallback;
+            }
+            else {
+                return;
+            }
+        }
 
         xf86PostProbe();
 
@@ -631,9 +671,13 @@ InitOutput(ScreenInfo * pScreenInfo, int argc, char **argv)
         }
 
         /* Remove (unload) drivers that are not required */
-        for (i = 0; i < xf86NumDrivers; i++)
-            if (xf86DriverList[i] && xf86DriverList[i]->refCount <= 0)
+        for (i = 0; i < xf86NumDrivers; )
+            if (xf86DriverList[i] &&
+		!xf86DriverHasEntities(xf86DriverList[i]) &&
+		xf86DriverList[i]->refCount <= 0)
                 xf86DeleteDriver(i);
+            else
+                i++;
 
         /*
          * At this stage we know how many screens there are.
@@ -930,6 +974,8 @@ InitOutput(ScreenInfo * pScreenInfo, int argc, char **argv)
     for (i = 0; i < xf86NumGPUScreens; i++)
         AttachUnboundGPU(xf86Screens[0]->pScreen, xf86GPUScreens[i]->pScreen);
 
+    xf86AutoConfigOutputDevices();
+
     xf86VGAarbiterWrapFunctions();
     if (sigio_blocked)
         OsReleaseSIGIO();
@@ -993,6 +1039,9 @@ OsVendorInit(void)
 
     if (!beenHere) {
         umask(022);
+        /* have glibc report internal abort traces to stderr instead of
+           the controlling terminal */
+        setenv("LIBC_FATAL_STDERR_", "1", 0);
         xf86LogInit();
     }
 
@@ -1454,6 +1503,17 @@ ddxProcessArgument(int argc, char **argv, int i)
         xf86Info.ShareVTs = TRUE;
         return 1;
     }
+    if (!strcmp(argv[i], "-mir")) {
+        CHECK_FOR_REQUIRED_ARGUMENT();
+        mirID = argv[++i];
+        xorgMir = TRUE;
+        return 2;
+    }
+    if (!strcmp(argv[i], "-mirSocket")) {
+        CHECK_FOR_REQUIRED_ARGUMENT();
+        mirSocket = argv[++i];
+        return 2;
+    }
 
     /* OS-specific processing */
     return xf86ProcessArgument(argc, argv, i);
@@ -1527,6 +1587,8 @@ ddxUseMsg(void)
     ErrorF
         ("-novtswitch            don't automatically switch VT at reset & exit\n");
     ErrorF("-sharevts              share VTs with another X server\n");
+    ErrorF
+        ("-mir MirID             run nested in a Mir compositor with app id MirID\n");
     /* OS-specific usage */
     xf86UseMsg();
     ErrorF("\n");

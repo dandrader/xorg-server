@@ -123,7 +123,8 @@ xf86InfoRec xf86Info = {
     .log = LogNone,
     .disableRandR = FALSE,
     .randRFrom = X_DEFAULT,
-#if defined(CONFIG_HAL) || defined(CONFIG_UDEV) || defined(CONFIG_WSCONS)
+#if defined(CONFIG_HAL) || defined(CONFIG_UDEV) || defined(CONFIG_WSCONS) || \
+    defined(CONFIG_DEVD)
     .forceInputDevices = FALSE,
     .autoAddDevices = TRUE,
     .autoEnableDevices = TRUE,
@@ -142,6 +143,7 @@ xf86InfoRec xf86Info = {
 const char *xf86ConfigFile = NULL;
 const char *xf86ConfigDir = NULL;
 const char *xf86ModulePath = DEFAULT_MODULE_PATH;
+const char *xf86ExtraModulePath = EXTRA_MODULE_PATH;
 MessageType xf86ModPathFrom = X_DEFAULT;
 const char *xf86LogFile = DEFAULT_LOGPREFIX;
 MessageType xf86LogFileFrom = X_DEFAULT;
@@ -160,6 +162,7 @@ InputDriverPtr *xf86InputDriverList = NULL;
 int xf86NumInputDrivers = 0;
 int xf86NumScreens = 0;
 int xf86NumGPUScreens = 0;
+Bool xf86AttemptedFallback = FALSE;
 
 const char *xf86VisualNames[] = {
     "StaticGray",
@@ -204,3 +207,6 @@ Bool xf86VidModeAllowNonLocal = FALSE;
 #endif
 RootWinPropPtr *xf86RegisteredPropertiesTable = NULL;
 Bool xorgHWAccess = FALSE;
+Bool xorgMir = FALSE;
+const char *mirID = NULL;
+const char *mirSocket = NULL;

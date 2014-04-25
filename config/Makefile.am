@@ -40,6 +40,10 @@ if CONFIG_WSCONS
 libconfig_la_SOURCES += wscons.c
 endif # CONFIG_WSCONS
 
+if CONFIG_DEVD
+libconfig_la_SOURCES += devd.c
+endif
+
 endif # CONFIG_NEED_DBUS
 
 endif # !CONFIG_UDEV

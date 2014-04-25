@@ -45,6 +45,12 @@
 #include "xf86sbusBus.h"
 #endif
 
+#if defined(__arm__) && defined(__linux__)
+#include "loaderProcs.h"
+#include <sys/types.h>          /* For opendir in test_sysfs_device */
+#include <dirent.h>             /* For opendir in test_sysfs_device */
+#endif
+
 #ifdef sun
 #include <sys/visual_io.h>
 #include <ctype.h>
@@ -74,6 +80,13 @@
 	"Section \"Screen\"\n" \
 	"\tIdentifier\t" BUILTIN_SCREEN_NAME "\n" \
 	"\tDevice\t" BUILTIN_DEVICE_NAME "\n" \
+	"EndSection\n\n"
+
+#define BUILTIN_SCREEN_SECTION_PROPRIETARY \
+	"Section \"Screen\"\n" \
+	"\tIdentifier\t" BUILTIN_SCREEN_NAME "\n" \
+	"\tDevice\t" BUILTIN_DEVICE_NAME "\n" \
+	"\tDefaultDepth\t24\n" \
 	"EndSection\n\n"
 
 #define BUILTIN_LAYOUT_SECTION_PRE \
@@ -154,7 +167,11 @@ xf86AutoConfig(void)
     for (p = deviceList; *p; p++) {
         snprintf(buf, sizeof(buf), BUILTIN_DEVICE_SECTION, *p, 0, *p);
         AppendToConfig(buf);
-        snprintf(buf, sizeof(buf), BUILTIN_SCREEN_SECTION, *p, 0, *p, 0);
+        if (strcmp(*p, "fglrx") == 0 || strcmp(*p, "nvidia") == 0)
+            snprintf(buf, sizeof(buf), BUILTIN_SCREEN_SECTION_PROPRIETARY, *p,
+                     0, *p, 0);
+        else
+            snprintf(buf, sizeof(buf), BUILTIN_SCREEN_SECTION, *p, 0, *p, 0);
         AppendToConfig(buf);
     }
 
@@ -188,6 +205,27 @@ xf86AutoConfig(void)
 
     return ret == CONFIG_OK;
 }
+
+#if defined(__arm__) && defined(__linux__)
+static int
+test_sysfs_device(char *device_name, char *driver_name)
+{
+    DIR *dir = opendir("/sys/devices/platform");
+    struct dirent *current_dir;
+    int len = strlen(device_name);
+
+    while (current_dir = readdir(dir)) {
+        if (strlen(current_dir->d_name) >= len &&
+            strncmp(device_name, current_dir->d_name, len) == 0)
+            break;
+    }
+    closedir(dir);
+    if (!current_dir)
+        return 0;
+
+    return 1;
+}
+#endif                          /* defined(__arm__) && defined(__linux__) */
 
 static void
 listPossibleVideoDrivers(char *matches[], int nmatches)
@@ -267,6 +305,21 @@ listPossibleVideoDrivers(char *matches[], int nmatches)
     if (i < (nmatches - 1))
         i = xf86PciMatchDriver(matches, nmatches);
 #endif
+
+#if defined(__linux__) && defined(__arm__)
+    if (i < (nmatches - 1)) {
+        if (test_sysfs_device("mxc_gpu", "imx"))
+            matches[i++] = xnfstrdup("imx");
+        else if (test_sysfs_device("dovefb", "dovefb"))
+            matches[i++] = xnfstrdup("dovefb");
+        else if (test_sysfs_device("omapdrm", "omap"))
+            matches[i++] = xnfstrdup("omap");
+        else if (test_sysfs_device("omapfb", "omapfb"))
+            matches[i++] = xnfstrdup("omapfb");
+        else if (test_sysfs_device("omap", "pvr"))
+            matches[i++] = xnfstrdup("pvr");
+    }
+#endif                          /* defined(__linux__) && defined(__arm__) */
 
 #if defined(__linux__)
     matches[i++] = xnfstrdup("modesetting");

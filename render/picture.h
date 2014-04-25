@@ -211,7 +211,7 @@ typedef pixman_fixed_t xFixed;
 /* whether 't' is a well defined not obviously empty trapezoid */
 #define xTrapezoidValid(t)  ((t)->left.p1.y != (t)->left.p2.y && \
 			     (t)->right.p1.y != (t)->right.p2.y && \
-			     (int) ((t)->bottom - (t)->top) > 0)
+			     (t)->bottom > 0 && (int) ((t)->bottom - (t)->top) > 0)
 
 /*
  * Standard NTSC luminance conversions:

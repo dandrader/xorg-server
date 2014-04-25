@@ -167,11 +167,12 @@ xf86_check_platform_slot(const struct xf86_platform_device *pd)
     for (i = 0; i < xf86NumEntities; i++) {
         const EntityPtr u = xf86Entities[i];
 
-        if (pd->pdev && u->bus.type == BUS_PCI)
-            return !MATCH_PCI_DEVICES(pd->pdev, u->bus.id.pci);
-        if ((u->bus.type == BUS_PLATFORM) && (pd == u->bus.id.plat)) {
+        if (pd->pdev && u->bus.type == BUS_PCI &&
+            MATCH_PCI_DEVICES(pd->pdev, u->bus.id.pci))
             return FALSE;
-        }
+
+        if ((u->bus.type == BUS_PLATFORM) && (pd == u->bus.id.plat))
+            return FALSE;
     }
     return TRUE;
 }
@@ -302,6 +303,11 @@ static Bool doPlatformProbe(struct xf86_platform_device *dev, DriverPtr drvp,
         for (nent = 0; nent < xf86NumEntities; nent++) {
             EntityPtr pEnt = xf86Entities[nent];
 
+            if (dev->pdev && pEnt->bus.type == BUS_PCI &&
+                MATCH_PCI_DEVICES(dev->pdev, pEnt->bus.id.pci)) {
+                return FALSE;
+            }
+
             if (pEnt->bus.type != BUS_PLATFORM)
                 continue;
             if (pEnt->bus.id.plat == dev) {
@@ -355,7 +361,7 @@ xf86platformProbeDev(DriverPtr drvp)
     Bool foundScreen = FALSE;
     GDevPtr *devList;
     const unsigned numDevs = xf86MatchDevice(drvp->driverName, &devList);
-    int i, j;
+    int i, j, flags;
 
     /* find the main device or any device specificed in xorg.conf */
     for (i = 0; i < numDevs; i++) {
@@ -368,17 +374,26 @@ xf86platformProbeDev(DriverPtr drvp)
                 /* for non-seat0 servers assume first device is the master */
                 if (ServerIsNotSeat0())
                     break;
-                if (xf86_platform_devices[j].pdev) {
-                    if (xf86IsPrimaryPlatform(&xf86_platform_devices[j]))
+                if (xf86IsPrimaryPlatform(&xf86_platform_devices[j]))
+                    break;
+                else
+                    /* there's no way to handle real platform devices at this point,
+                     * as there's no valid busID to be used, so try to move forward
+                     * in case there's only one platform device, and see if the
+                     * driver's probe succeeds or not at least once */
+                    if ((xf86_num_platform_devices == 1) && (!foundScreen))
                         break;
-                }
             }
         }
 
         if (j == xf86_num_platform_devices)
              continue;
 
-        foundScreen = probeSingleDevice(&xf86_platform_devices[j], drvp, devList[i], 0);
+        flags = 0;
+        if (!devList[i]->active)
+            flags |= PLATFORM_PROBE_GPU_SCREEN;
+
+        foundScreen = probeSingleDevice(&xf86_platform_devices[j], drvp, devList[i], flags);
         if (!foundScreen)
             continue;
     }
@@ -390,8 +405,11 @@ xf86platformProbeDev(DriverPtr drvp)
         }
     }
 
+    free(devList);
     return foundScreen;
 }
+
+extern void xf86AutoConfigOutputDevice(ScrnInfoPtr pScrn, ScrnInfoPtr master);
 
 int
 xf86platformAddDevice(int index)
@@ -465,6 +483,7 @@ xf86platformAddDevice(int index)
    }
    /* attach unbound to 0 protocol screen */
    AttachUnboundGPU(xf86Screens[0]->pScreen, xf86GPUScreens[i]->pScreen);
+   xf86AutoConfigOutputDevice(xf86GPUScreens[i], xf86Screens[0]);
 
    RRResourcesChanged(xf86Screens[0]->pScreen);
    RRTellChanged(xf86Screens[0]->pScreen);

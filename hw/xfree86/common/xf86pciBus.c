@@ -135,8 +135,8 @@ xf86PciProbe(void)
                 }
                 else {
                     xf86Msg(X_NOTICE,
-                            "More than one possible primary device found\n");
-                    primaryBus.type ^= (BusType) (-1);
+                            "More than one possible primary device found.  Using first one seen.\n");
+                    break;
                 }
             }
         }
@@ -545,6 +545,15 @@ xf86PciProbeDev(DriverPtr drvp)
 
                     for (k = 0; k < xf86NumEntities; k++) {
                         EntityPtr pEnt = xf86Entities[k];
+
+#ifdef XSERVER_PLATFORM_BUS
+                        if (pEnt->bus.type == BUS_PLATFORM &&
+                            pEnt->bus.id.plat->pdev &&
+                            MATCH_PCI_DEVICES(pEnt->bus.id.plat->pdev, pPci)) {
+                            foundScreen = TRUE;
+                            break;
+                        }
+#endif
 
                         if (pEnt->bus.type != BUS_PCI)
                             continue;
@@ -1132,7 +1141,8 @@ xf86VideoPtrToDriverList(struct pci_device *dev,
         driverList[0] = "ast";
         break;
     case 0x1002:
-        driverList[0] = "ati";
+        driverList[0] = "fglrx";
+        driverList[1] = "ati";
         break;
     case 0x102c:
         driverList[0] = "chips";
@@ -1216,10 +1226,12 @@ xf86VideoPtrToDriverList(struct pci_device *dev,
     {
         int idx = 0;
 
+        driverList[idx++] = "nvidia";
 #ifdef __linux__
         driverList[idx++] = "nouveau";
-#endif
+#else
         driverList[idx++] = "nv";
+#endif
         break;
     }
     case 0x1106:

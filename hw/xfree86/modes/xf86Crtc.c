@@ -3383,3 +3383,35 @@ xf86DetachAllCrtc(ScrnInfoPtr scrn)
             crtc->x = crtc->y = 0;
         }
 }
+
+
+void xf86AutoConfigOutputDevice(ScrnInfoPtr pScrn, ScrnInfoPtr master)
+{
+    RRProviderPtr master_provider;
+    xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(master);
+    xf86CrtcConfigPtr slave_config = XF86_CRTC_CONFIG_PTR(pScrn);
+    Bool unbound = FALSE;
+
+    if (!config || !slave_config)
+        return;
+
+    master_provider = config->randr_provider;
+
+    if ((master->capabilities & RR_Capability_SinkOffload) &&
+        pScrn->capabilities & RR_Capability_SourceOffload) {
+            /* source offload */
+            
+        DetachUnboundGPU(pScrn->pScreen);
+        unbound = TRUE;
+        AttachOffloadGPU(master->pScreen, pScrn->pScreen);
+        slave_config->randr_provider->offload_sink = master_provider;
+    }
+    if ((master->capabilities & RR_Capability_SourceOutput) &&
+               pScrn->capabilities & RR_Capability_SinkOutput) {
+        /* sink offload */
+        if (!unbound)
+            DetachUnboundGPU(pScrn->pScreen);
+        AttachOutputGPU(master->pScreen, pScrn->pScreen);
+        slave_config->randr_provider->output_source = master_provider;
+    }
+}

@@ -118,6 +118,7 @@ static ModuleDefault ModuleDefaults[] = {
     {.name = "fb",.toLoad = TRUE,.load_opt = NULL},
     {.name = "shadow",.toLoad = TRUE,.load_opt = NULL},
 #endif
+    {.name = "xmir", .toLoad = FALSE, .load_opt = NULL},
     {.name = NULL,.toLoad = FALSE,.load_opt = NULL}
 };
 
@@ -258,6 +259,17 @@ xf86ModulelistFromConfig(pointer **optlist)
     if (xf86configptr == NULL) {
         xf86Msg(X_ERROR, "Cannot access global config data structure\n");
         return NULL;
+    }
+
+    /*
+     * Set the xmir module to autoload if requested.
+     */
+    if (xorgMir) {
+        for (i=0 ; ModuleDefaults[i].name != NULL ; i++) {
+            if (strcmp(ModuleDefaults[i].name, "xmir") == 0) {
+                ModuleDefaults[i].toLoad = TRUE;
+            }
+        }
     }
 
     if (xf86configptr->conf_modules) {
@@ -640,10 +652,21 @@ configFiles(XF86ConfFilesPtr fileconf)
 
     /* ModulePath */
 
-    if (fileconf) {
-        if (xf86ModPathFrom != X_CMDLINE && fileconf->file_modulepath) {
+    if (xf86ModPathFrom != X_CMDLINE) {
+        if (fileconf && fileconf->file_modulepath) {
             xf86ModulePath = fileconf->file_modulepath;
             xf86ModPathFrom = X_CONFIG;
+        }
+        else if (strcmp(xf86ExtraModulePath, "") != 0) {
+            char *newpath = malloc(strlen(xf86ExtraModulePath)
+                                   + strlen(xf86ModulePath)
+                                   + 2);
+
+            strcpy(newpath, xf86ExtraModulePath);
+            strcat(newpath, ",");
+            strcat(newpath, xf86ModulePath);
+
+            xf86ModulePath = newpath;
         }
     }
 
@@ -1377,15 +1400,18 @@ checkCoreInputDevices(serverLayoutPtr servlayoutp, Bool implicitLayout)
     }
 
     if (!xf86Info.forceInputDevices && !(foundPointer && foundKeyboard)) {
-#if defined(CONFIG_HAL) || defined(CONFIG_UDEV) || defined(CONFIG_WSCONS)
+#if defined(CONFIG_HAL) || defined(CONFIG_UDEV) || defined(CONFIG_WSCONS) || \
+    defined(CONFIG_DEVD)
         const char *config_backend;
 
 #if defined(CONFIG_HAL)
         config_backend = "HAL";
 #elif defined(CONFIG_UDEV)
         config_backend = "udev";
-#else
+#elif defined(CONFIG_WSCONS)
         config_backend = "wscons";
+#elif defined(CONFIG_DEVD)
+        config_backend = "devd";
 #endif
         xf86Msg(X_INFO, "The server relies on %s to provide the list of "
                 "input devices.\n\tIf no devices become available, "

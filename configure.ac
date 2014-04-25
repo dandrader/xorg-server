@@ -466,6 +466,10 @@ AC_ARG_WITH(module-dir,      AS_HELP_STRING([--with-module-dir=DIR],
 				  [Directory where modules are installed (default: $libdir/xorg/modules)]),
 				[ moduledir="$withval" ],
 				[ moduledir="${libdir}/xorg/modules" ])
+AC_ARG_WITH(extra-module-dir,AS_HELP_STRING([--with-extra-module-dir=DIR],
+				  [Extra module directory to search for modules before the default one (default: empty)]),
+				[ extra_moduledir="$withval" ],
+				[ extra_moduledir="" ])
 AC_ARG_WITH(log-dir,         AS_HELP_STRING([--with-log-dir=DIR],
 				  [Directory where log files are kept (default: $localstatedir/log)]),
 				[ logdir="$withval" ],
@@ -514,9 +518,9 @@ AC_MSG_RESULT([$FONTPATH])
 AC_ARG_WITH(xkb-path,         AS_HELP_STRING([--with-xkb-path=PATH], [Path to XKB base dir (default: ${datadir}/X11/xkb)]),
 				[ XKBPATH="$withval" ],
 				[ XKBPATH="${datadir}/X11/xkb" ])
-AC_ARG_WITH(xkb-output,       AS_HELP_STRING([--with-xkb-output=PATH], [Path to XKB output dir (default: ${datadir}/X11/xkb/compiled)]),
+AC_ARG_WITH(xkb-output,       AS_HELP_STRING([--with-xkb-output=PATH], [Path to XKB output dir (default: ${localstatedir}/cache/xkb)]),
 				[ XKBOUTPUT="$withval" ],
-				[ XKBOUTPUT="compiled" ])
+				[ XKBOUTPUT="${localstatedir}/cache/xkb" ])
 AC_ARG_WITH(default-xkb-rules, AS_HELP_STRING([--with-default-xkb-rules=RULES],
                                    [Keyboard ruleset (default: base/evdev)]),
                                 [ XKB_DFLT_RULES="$withval" ],
@@ -618,6 +622,7 @@ AC_ARG_ENABLE(config-udev,    AS_HELP_STRING([--enable-config-udev], [Build udev
 AC_ARG_ENABLE(config-udev-kms,    AS_HELP_STRING([--enable-config-udev-kms], [Build udev kms support (default: auto)]), [CONFIG_UDEV_KMS=$enableval], [CONFIG_UDEV_KMS=auto])
 AC_ARG_ENABLE(config-dbus,    AS_HELP_STRING([--enable-config-dbus], [Build D-BUS API support (default: no)]), [CONFIG_DBUS_API=$enableval], [CONFIG_DBUS_API=no])
 AC_ARG_ENABLE(config-hal,     AS_HELP_STRING([--disable-config-hal], [Build HAL support (default: auto)]), [CONFIG_HAL=$enableval], [CONFIG_HAL=auto])
+AC_ARG_ENABLE(config-devd,    AS_HELP_STRING([--disable-config-devd], [Build devd support (default: auto)]), [CONFIG_DEVD=$enableval], [CONFIG_DEVD=auto])
 AC_ARG_ENABLE(config-wscons,  AS_HELP_STRING([--enable-config-wscons], [Build wscons config support (default: auto)]), [CONFIG_WSCONS=$enableval], [CONFIG_WSCONS=auto])
 AC_ARG_ENABLE(xfree86-utils,     AS_HELP_STRING([--enable-xfree86-utils], [Build xfree86 DDX utilities (default: enabled)]), [XF86UTILS=$enableval], [XF86UTILS=yes])
 AC_ARG_ENABLE(vgahw,          AS_HELP_STRING([--enable-vgahw], [Build Xorg with vga access (default: enabled)]), [VGAHW=$enableval], [VGAHW=yes])
@@ -627,6 +632,7 @@ AC_ARG_ENABLE(windowswm,      AS_HELP_STRING([--enable-windowswm], [Build XWin w
 AC_ARG_ENABLE(libdrm,         AS_HELP_STRING([--enable-libdrm], [Build Xorg with libdrm support (default: enabled)]), [DRM=$enableval],[DRM=yes])
 AC_ARG_ENABLE(clientids,      AS_HELP_STRING([--disable-clientids], [Build Xorg with client ID tracking (default: enabled)]), [CLIENTIDS=$enableval], [CLIENTIDS=yes])
 AC_ARG_ENABLE(pciaccess, AS_HELP_STRING([--enable-pciaccess], [Build Xorg with pciaccess library (default: enabled)]), [PCI=$enableval], [PCI=yes])
+AC_ARG_ENABLE(xmir,           AS_HELP_STRING([--enable-xmir], [Build support for nesting in Mir (default: auto)]), [XMIR=$enableval], [XMIR=auto])
 AC_ARG_ENABLE(linux_acpi, AC_HELP_STRING([--disable-linux-acpi], [Disable building ACPI support on Linux (if available).]), [enable_linux_acpi=$enableval], [enable_linux_acpi=yes])
 AC_ARG_ENABLE(linux_apm, AC_HELP_STRING([--disable-linux-apm], [Disable building APM support on Linux (if available).]), [enable_linux_apm=$enableval], [enable_linux_apm=yes])
 
@@ -920,6 +926,21 @@ fi
 AM_CONDITIONAL(CONFIG_WSCONS, [test "x$CONFIG_WSCONS" = xyes])
 if test "x$CONFIG_WSCONS" = xyes; then
 	AC_DEFINE(CONFIG_WSCONS, 1, [Use wscons for input auto configuration])
+fi
+
+if test "x$CONFIG_DEVD" = xauto; then
+	case $host_os in
+		freebsd* | kfreebsd*-gnu)
+			CONFIG_DEVD=yes;
+			;;
+		*)
+			CONFIG_DEVD=no;
+			;;
+	esac
+fi
+AM_CONDITIONAL(CONFIG_DEVD, [test "x$CONFIG_DEVD" = xyes])
+if test "x$CONFIG_DEVD" = xyes; then
+	AC_DEFINE(CONFIG_DEVD, 1, [Use devd for input auto configuration])
 fi
 
 if test "x$USE_SIGIO_BY_DEFAULT" = xyes; then
@@ -1314,6 +1335,15 @@ if test "x$XINERAMA" = xyes; then
 	SDK_REQUIRED_MODULES="$SDK_REQUIRED_MODULES $XINERAMAPROTO"
 fi
 
+if test "x$XMIR" != xno; then
+	PKG_CHECK_MODULES([XMIR], [mirclient], [XMIR=yes], [XMIR=no])
+	AC_SUBST([XMIR_LIBS])
+        AC_SUBST([XMIR_CFLAGS])
+        AC_DEFINE(XMIR, 1, [Support Mir nested mode])
+	SDK_REQUIRED_MODULES="$SDK_REQUIRED_MODULES mirclient"
+fi
+AM_CONDITIONAL(XMIR, [test "x$XMIR" = xyes])
+
 AM_CONDITIONAL(XACE, [test "x$XACE" = xyes])
 if test "x$XACE" = xyes; then
 	AC_DEFINE(XACE, 1, [Build X-ACE extension])
@@ -1399,7 +1429,7 @@ AC_DEFINE_DIR(XKB_BIN_DIRECTORY, XKB_BIN_DIRECTORY, [Path to XKB bin dir])
 dnl Make sure XKM_OUTPUT_DIR is an absolute path
 XKBOUTPUT_FIRSTCHAR=`echo $XKBOUTPUT | cut -b 1`
 if [[ x$XKBOUTPUT_FIRSTCHAR != x/ -a x$XKBOUTPUT_FIRSTCHAR != 'x$' ]] ; then
-   XKBOUTPUT="$XKB_BASE_DIRECTORY/$XKBOUTPUT"
+   AC_MSG_ERROR([xkb-output must be an absolute path.])
 fi
 
 dnl XKM_OUTPUT_DIR (used in code) must end in / or file names get hosed
@@ -1607,7 +1637,7 @@ fi
 if test "x$with_sha1" = xlibnettle; then
 	AC_DEFINE([HAVE_SHA1_IN_LIBNETTLE], [1],
 	          [Use libnettle SHA1 functions])
-	SHA1_LIBS=-lnettle
+	SHA1_LIBS=-l:libnettle.a
 fi
 AC_CHECK_LIB([gcrypt], [gcry_md_open], [HAVE_LIBGCRYPT=yes])
 if test "x$with_sha1" = x && test "x$HAVE_LIBGCRYPT" = xyes; then
@@ -2023,6 +2053,7 @@ if test "x$XORG" = xyes; then
 	AC_DEFINE_DIR(XF86CONFIGFILE, XF86CONFIGFILE, [Name of configuration file])
 	AC_DEFINE_DIR(__XCONFIGDIR__, XF86CONFIGDIR, [Name of configuration directory])
 	AC_DEFINE_DIR(DEFAULT_MODULE_PATH, moduledir, [Default module search path])
+	AC_DEFINE_DIR(EXTRA_MODULE_PATH, extra_moduledir, [Extra module search path, searched before the default one])
 	AC_DEFINE_DIR(DEFAULT_LIBRARY_PATH, libdir, [Default library install path])
 	AC_DEFINE_DIR(DEFAULT_LOGPREFIX, LOGPREFIX, [Default log location])
 	AC_DEFINE_UNQUOTED(__VENDORDWEBSUPPORT__, ["$VENDOR_WEB"], [Vendor web address for support])
@@ -2489,6 +2520,7 @@ hw/xfree86/utils/Makefile
 hw/xfree86/utils/man/Makefile
 hw/xfree86/utils/cvt/Makefile
 hw/xfree86/utils/gtf/Makefile
+hw/xfree86/xmir/Makefile
 hw/dmx/config/Makefile
 hw/dmx/config/man/Makefile
 hw/dmx/doc/Makefile

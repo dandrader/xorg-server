@@ -234,7 +234,7 @@ xf86XVScreenInit(ScreenPtr pScreen, XF86VideoAdaptorPtr * adaptors, int num)
     XF86XVScreenPtr ScreenPriv;
     XvScreenPtr pxvs;
 
-    if (num <= 0 || noXvExtension)
+    if (num <= 0 || noXvExtension || pScreen->isGPU)
         return FALSE;
 
     if (Success != XvScreenInit(pScreen))

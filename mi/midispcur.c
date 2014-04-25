@@ -435,6 +435,10 @@ miDCRestoreUnderCursor(DeviceIntPtr pDev, ScreenPtr pScreen,
     GCPtr pGC;
 
     pBuffer = miGetDCDevice(pDev, pScreen);
+
+    if (!pBuffer)
+        return FALSE;
+
     pSave = pBuffer->pSave;
 
     pWin = pScreen->root;

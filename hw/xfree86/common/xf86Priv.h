@@ -77,6 +77,7 @@ extern _X_EXPORT const char *xf86ServerName;
 
 extern _X_EXPORT xf86InfoRec xf86Info;
 extern _X_EXPORT const char *xf86ModulePath;
+extern _X_EXPORT const char *xf86ExtraModulePath;
 extern _X_EXPORT MessageType xf86ModPathFrom;
 extern _X_EXPORT const char *xf86LogFile;
 extern _X_EXPORT MessageType xf86LogFileFrom;
@@ -88,9 +89,13 @@ extern _X_EXPORT int xf86NumDrivers;
 extern _X_EXPORT Bool xf86Resetting;
 extern _X_EXPORT Bool xf86Initialising;
 extern _X_EXPORT int xf86NumScreens;
+extern _X_EXPORT Bool xf86AttemptedFallback;
 extern _X_EXPORT const char *xf86VisualNames[];
 extern _X_EXPORT int xf86Verbose;       /* verbosity level */
 extern _X_EXPORT int xf86LogVerbose;    /* log file verbosity level */
+extern _X_EXPORT Bool xorgMir;
+extern _X_EXPORT const char *mirID;
+extern _X_EXPORT const char *mirSocket;
 
 extern _X_EXPORT RootWinPropPtr *xf86RegisteredPropertiesTable;
 
@@ -147,6 +152,9 @@ xf86HandlePMEvents(int fd, pointer data);
 extern _X_EXPORT int (*xf86PMGetEventFromOs) (int fd, pmEvent * events,
                                               int num);
 extern _X_EXPORT pmWait (*xf86PMConfirmEventToOs) (int fd, pmEvent event);
+extern _X_EXPORT void
+xf86VTSwitch(void);
+
 
 /* xf86Helper.c */
 extern _X_EXPORT void

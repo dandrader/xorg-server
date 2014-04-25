@@ -3911,6 +3911,8 @@ AttachUnboundGPU(ScreenPtr pScreen, ScreenPtr new)
     assert(new->isGPU);
     assert(!new->current_master);
     xorg_list_add(&new->unattached_head, &pScreen->unattached_list);
+    xorg_list_init(&new->offload_head);
+    xorg_list_init(&new->output_head);
     new->current_master = pScreen;
 }
 
@@ -3935,7 +3937,8 @@ DetachOutputGPU(ScreenPtr slave)
 {
     assert(slave->isGPU);
     xorg_list_del(&slave->output_head);
-    slave->current_master = NULL;
+    if (xorg_list_is_empty(&slave->offload_head))
+        slave->current_master = NULL;
 }
 
 void
@@ -3951,6 +3954,7 @@ DetachOffloadGPU(ScreenPtr slave)
 {
     assert(slave->isGPU);
     xorg_list_del(&slave->offload_head);
-    slave->current_master = NULL;
+    if (xorg_list_is_empty(&slave->output_head))
+        slave->current_master = NULL;
 }
 

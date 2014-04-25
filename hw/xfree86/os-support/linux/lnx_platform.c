@@ -160,6 +160,8 @@ xf86PlatformDeviceProbe(struct OdevAttributes *attribs)
     return;
 
 out_free:
+    LogMessage(X_INFO, "config/udev: Ignoring already known drm device (%s)\n",
+               path);
     config_odev_free_attribute_list(attribs);
 }
 
