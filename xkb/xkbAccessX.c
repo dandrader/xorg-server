@@ -788,5 +788,4 @@ ProcessPointerEvent(InternalEvent *ev, DeviceIntPtr mouse)
         sn.changed = changed;
         XkbSendStateNotify(dev, &sn);
     }
-
 }                               /* ProcessPointerEvent */

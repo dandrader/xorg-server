@@ -156,26 +156,36 @@ TouchFindByDDXID(DeviceIntPtr dev, uint32_t ddx_id, Bool create)
 DDXTouchPointInfoPtr
 TouchBeginDDXTouch(DeviceIntPtr dev, uint32_t ddx_id)
 {
+    DanStackUp;
     static int next_client_id = 1;
     int i;
     TouchClassPtr t = dev->touch;
     DDXTouchPointInfoPtr ti = NULL;
     Bool emulate_pointer;
+    DDXTouchPointInfoPtr result = NULL;
 
     if (!t)
-        return NULL;
+    {
+        DanLog("ddx id %d - No dev->touch!\n", ddx_id);
+        goto EXIT;
+    }
 
     emulate_pointer = (t->mode == XIDirectTouch);
 
     /* Look for another active touchpoint with the same DDX ID. DDX
      * touchpoints must be unique. */
     if (TouchFindByDDXID(dev, ddx_id, FALSE))
-        return NULL;
+    {
+        DanLog("An active touch with ddx id %d exists\n", ddx_id);
+        goto EXIT;
+    }
 
     for (i = 0; i < dev->last.num_touches; i++) {
         /* Only emulate pointer events on the first touch */
         if (dev->last.touches[i].active)
+        {
             emulate_pointer = FALSE;
+        }
         else if (!ti)           /* ti is now first non-active touch rec */
             ti = &dev->last.touches[i];
 
@@ -194,7 +204,11 @@ TouchBeginDDXTouch(DeviceIntPtr dev, uint32_t ddx_id)
             next_client_id = 1;
         ti->client_id = client_id;
         ti->emulate_pointer = emulate_pointer;
-        return ti;
+
+        DanLog("ddx id %d, touch %d - returning with emulate pointer == %d\n",
+               ddx_id, client_id, emulate_pointer);
+        result = ti;
+        goto EXIT;
     }
 
     /* If we get here, then we've run out of touches and we need to drop the
@@ -208,7 +222,10 @@ TouchBeginDDXTouch(DeviceIntPtr dev, uint32_t ddx_id)
         QueueWorkProc(TouchResizeQueue, serverClient, NULL);
     }
 
-    return NULL;
+    DanLog("ddx id %d, emulate pointer == %d, returning *NULL*.\n", ddx_id, emulate_pointer);
+    EXIT:
+    DanStackDown;
+    return result;
 }
 
 void
@@ -369,6 +386,9 @@ TouchBeginTouch(DeviceIntPtr dev, int sourceid, uint32_t touchid,
 void
 TouchEndTouch(DeviceIntPtr dev, TouchPointInfoPtr ti)
 {
+    DanStackUp;
+    DanLog("\n");
+
     int i;
 
     if (ti->emulate_pointer) {
@@ -397,6 +417,7 @@ TouchEndTouch(DeviceIntPtr dev, TouchPointInfoPtr ti)
     TouchEventHistoryFree(ti);
 
     valuator_mask_zero(ti->valuators);
+    DanStackDown;
 }
 
 /**
@@ -472,10 +493,13 @@ TouchEventHistoryPush(TouchPointInfoPtr ti, const DeviceEvent *ev)
 void
 TouchEventHistoryReplay(TouchPointInfoPtr ti, DeviceIntPtr dev, XID resource)
 {
+    DanStackUp;
+    DanLog("touch %d\n", ti->client_id);
+
     int i;
 
     if (!ti->history)
-        return;
+        goto EXIT;
 
     TouchDeliverDeviceClassesChangedEvent(ti, ti->history[0].time, resource);
 
@@ -499,6 +523,9 @@ TouchEventHistoryReplay(TouchPointInfoPtr ti, DeviceIntPtr dev, XID resource)
          */
         dev->public.processInputProc((InternalEvent*)ev, dev);
     }
+
+    EXIT:
+    DanStackDown;
 }
 
 void
@@ -571,8 +598,10 @@ Bool
 TouchBuildSprite(DeviceIntPtr sourcedev, TouchPointInfoPtr ti,
                  InternalEvent *ev)
 {
+    DanStackUp;
     TouchClassPtr t = sourcedev->touch;
     SpritePtr sprite = &ti->sprite;
+    Bool result = FALSE;
 
     if (t->mode == XIDirectTouch) {
         /* Focus immediately under the touchpoint in direct touch mode.
@@ -582,21 +611,32 @@ TouchBuildSprite(DeviceIntPtr sourcedev, TouchPointInfoPtr ti,
         XYToWindow(sprite, ev->device_event.root_x, ev->device_event.root_y);
     }
     else if (!TouchBuildDependentSpriteTrace(sourcedev, sprite))
-        return FALSE;
+        goto EXIT;
 
     if (sprite->spriteTraceGood <= 0)
-        return FALSE;
+        goto EXIT;
 
     /* Mark which grabs/event selections we're delivering to: max one grab per
      * window plus the bottom-most event selection, plus any active grab. */
     ti->listeners = calloc(sprite->spriteTraceGood + 2, sizeof(*ti->listeners));
     if (!ti->listeners) {
         sprite->spriteTraceGood = 0;
-        return FALSE;
+        goto EXIT;
     }
     ti->num_listeners = 0;
 
-    return TRUE;
+    result = TRUE;
+    EXIT:
+    if (sprite->win != NULL)
+    {
+        DanLog(" touch %d - sprite->win id %#x\n", ti->client_id, sprite->win->drawable.id);
+    }
+    else
+    {
+        DanLog(" touch %d - sprite->win NULL\n", ti->client_id);
+    }
+    DanStackDown;
+    return result;
 }
 
 /**
@@ -617,11 +657,13 @@ TouchConvertToPointerEvent(const InternalEvent *event,
                            InternalEvent *motion_event,
                            InternalEvent *button_event)
 {
+    DanStackUp;
     int ptrtype;
     int nevents = 0;
 
-    BUG_RETURN_VAL(!event, 0);
-    BUG_RETURN_VAL(!motion_event, 0);
+    BUG_WARN(!event);
+    BUG_WARN(!motion_event);
+    if (!event || !motion_event) goto EXIT;
 
     switch (event->any.type) {
     case ET_TouchUpdate:
@@ -637,7 +679,8 @@ TouchConvertToPointerEvent(const InternalEvent *event,
         break;
     default:
         BUG_WARN_MSG(1, "Invalid event type %d\n", event->any.type);
-        return 0;
+        nevents = 0;
+        goto EXIT;
     }
 
     BUG_WARN_MSG(!(event->device_event.flags & TOUCH_POINTER_EMULATED),
@@ -654,8 +697,12 @@ TouchConvertToPointerEvent(const InternalEvent *event,
         button_event->any.type = ptrtype;
         button_event->device_event.flags = XIPointerEmulated;
         /* detail is already correct */
+        if (ptrtype == ET_ButtonPress)
+           DanLog("Creating emulated internal button press event.\n");
     }
 
+    EXIT:
+    DanStackDown;
     return nevents;
 }
 
@@ -703,6 +750,7 @@ TouchAddListener(TouchPointInfoPtr ti, XID resource, int resource_type,
                  enum TouchListenerState state, WindowPtr window,
                  const GrabPtr grab)
 {
+    DanStackUp;
     GrabPtr g = NULL;
 
     /* We need a copy of the grab, not the grab itself since that may be
@@ -721,6 +769,9 @@ TouchAddListener(TouchPointInfoPtr ti, XID resource, int resource_type,
     if (grab)
         ti->num_grabs++;
     ti->num_listeners++;
+
+    DanLog("adding listener window %#x for touch %d\n", window->drawable.id, ti->client_id);
+    DanStackDown;
 }
 
 /**
@@ -762,6 +813,22 @@ static void
 TouchAddGrabListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
                      InternalEvent *ev, GrabPtr grab)
 {
+    DanStackUp;
+
+    ClientPtr client;
+    client = clients[CLIENT_ID(grab->resource)];
+    if (client)
+    {
+        DanLog("client[%d,%s %s]\n",
+               GetClientPid(client),
+               GetClientCmdName(client),
+               GetClientCmdArgs(client));
+    }
+    else
+    {
+        DanLog("\n");
+    }
+
     enum TouchListenerType type = LISTENER_GRAB;
 
     /* FIXME: owner_events */
@@ -780,6 +847,7 @@ TouchAddGrabListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
     /* grab listeners are always RT_NONE since we keep the grab pointer */
     TouchAddListener(ti, grab->resource, RT_NONE, grab->grabtype,
                      type, LISTENER_AWAITING_BEGIN, grab->window, grab);
+    DanStackDown;
 }
 
 /**
@@ -789,21 +857,27 @@ static void
 TouchAddPassiveGrabListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
                             WindowPtr win, InternalEvent *ev)
 {
+    DanStackUp;
     GrabPtr grab;
     Bool check_core = IsMaster(dev) && ti->emulate_pointer;
 
     /* FIXME: make CheckPassiveGrabsOnWindow only trigger on TouchBegin */
     grab = CheckPassiveGrabsOnWindow(win, dev, ev, check_core, FALSE);
     if (!grab)
-        return;
+        goto EXIT;
 
+    DanLog("\n");
     TouchAddGrabListener(dev, ti, ev, grab);
+    EXIT:
+    DanStackDown;
 }
 
 static Bool
 TouchAddRegularListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
                         WindowPtr win, InternalEvent *ev)
 {
+    DanStackUp;
+    Bool result = FALSE;
     InputClients *iclients = NULL;
     OtherInputMasks *inputMasks = NULL;
     uint16_t evtype = 0;        /* may be event type or emulated event type */
@@ -813,7 +887,7 @@ TouchAddRegularListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
     evtype = GetXI2Type(ev->any.type);
     mask = EventIsDeliverable(dev, ev->any.type, win);
     if (!mask && !ti->emulate_pointer)
-        return FALSE;
+        goto EXIT;
     else if (!mask) {           /* now try for pointer event */
         mask = EventIsDeliverable(dev, TouchGetPointerEventType(ev), win);
         if (mask) {
@@ -822,11 +896,12 @@ TouchAddRegularListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
         }
     }
     if (!mask)
-        return FALSE;
+        goto EXIT;
 
     inputMasks = wOtherInputMasks(win);
 
     if (mask & EVENT_XI2_MASK) {
+        DanLog("EVENT_XI2_MASK\n");
         nt_list_for_each_entry(iclients, inputMasks->inputClients, next) {
             if (!xi2mask_isset(iclients->xi2mask, dev, evtype))
                 continue;
@@ -836,11 +911,13 @@ TouchAddRegularListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
 
             TouchAddListener(ti, iclients->resource, RT_INPUTCLIENT, XI2,
                              type, LISTENER_AWAITING_BEGIN, win, NULL);
-            return TRUE;
+            result = TRUE;
+            goto EXIT;
         }
     }
 
     if (mask & EVENT_XI1_MASK) {
+        DanLog("EVENT_XI1_MASK\n");
         int xitype = GetXIType(TouchGetPointerEventType(ev));
         Mask xi_filter = event_get_filter_from_type(dev, xitype);
 
@@ -852,7 +929,8 @@ TouchAddRegularListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
             TouchAddListener(ti, iclients->resource, RT_INPUTCLIENT, XI,
                              LISTENER_POINTER_REGULAR, LISTENER_AWAITING_BEGIN,
                              win, NULL);
-            return TRUE;
+            result = TRUE;
+            goto EXIT;
         }
     }
 
@@ -863,11 +941,13 @@ TouchAddRegularListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
 
         /* window owner */
         if (IsMaster(dev) && (win->eventMask & core_filter)) {
+            DanLog("EVENT_CORE_MASK, window owner\n");
             TouchEventHistoryAllocate(ti);
             TouchAddListener(ti, win->drawable.id, RT_WINDOW, CORE,
                              LISTENER_POINTER_REGULAR, LISTENER_AWAITING_BEGIN,
                              win, NULL);
-            return TRUE;
+            result = TRUE;
+            goto EXIT;
         }
 
         /* all others */
@@ -876,34 +956,44 @@ TouchAddRegularListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
                 continue;
 
             TouchEventHistoryAllocate(ti);
+            DanLog("EVENT_CORE_MASK, all others\n");
             TouchAddListener(ti, oclients->resource, RT_OTHERCLIENT, CORE,
                              type, LISTENER_AWAITING_BEGIN, win, NULL);
-            return TRUE;
+            result = TRUE;
+            goto EXIT;
         }
     }
 
-    return FALSE;
+    EXIT:
+    DanStackDown;
+    return result;
 }
 
 static void
 TouchAddActiveGrabListener(DeviceIntPtr dev, TouchPointInfoPtr ti,
                            InternalEvent *ev, GrabPtr grab)
 {
+    DanStackUp;
     if (!ti->emulate_pointer &&
         (grab->grabtype == CORE || grab->grabtype == XI))
-        return;
+        goto EXIT;
 
     if (!ti->emulate_pointer &&
         grab->grabtype == XI2 &&
         !xi2mask_isset(grab->xi2mask, dev, XI_TouchBegin))
-        return;
+        goto EXIT;
 
+    DanLog("\n");
     TouchAddGrabListener(dev, ti, ev, grab);
+    EXIT:
+    DanStackDown;
 }
 
 void
 TouchSetupListeners(DeviceIntPtr dev, TouchPointInfoPtr ti, InternalEvent *ev)
 {
+    DanStackUp;
+    DanLog("\n");
     int i;
     SpritePtr sprite = &ti->sprite;
     WindowPtr win;
@@ -914,7 +1004,7 @@ TouchSetupListeners(DeviceIntPtr dev, TouchPointInfoPtr ti, InternalEvent *ev)
     /* We set up an active touch listener for existing touches, but not any
      * passive grab or regular listeners. */
     if (ev->any.type != ET_TouchBegin)
-        return;
+        goto EXIT;
 
     /* First, find all grabbing clients from the root window down
      * to the deepest child window. */
@@ -931,8 +1021,17 @@ TouchSetupListeners(DeviceIntPtr dev, TouchPointInfoPtr ti, InternalEvent *ev)
         win = sprite->spriteTrace[i];
         delivered = TouchAddRegularListener(dev, ti, win, ev);
         if (delivered)
-            return;
+            goto EXIT;
     }
+    EXIT:
+    DanLogDetail("listeners for touch %d:\n", ti->client_id);
+    for (i = 0; i < ti->num_listeners; ++i)
+    {
+        char buffer[300];
+        DanPrintTouchListener(buffer, &(ti->listeners[i]));
+        DanLogDetail("%s\n", buffer);
+    }
+    DanStackDown;
 }
 
 /**
@@ -1008,12 +1107,26 @@ int
 TouchListenerAcceptReject(DeviceIntPtr dev, TouchPointInfoPtr ti, int listener,
                           int mode)
 {
+    DanStackUp;
+    int result;
+    DanLog("\n");
+
     InternalEvent *events;
     int nev;
     int i;
 
-    BUG_RETURN_VAL(listener < 0, BadMatch);
-    BUG_RETURN_VAL(listener >= ti->num_listeners, BadMatch);
+    //BUG_RETURN_VAL(listener < 0, BadMatch);
+    if (listener < 0) {
+        BUG_WARN_MSG(TRUE, "listener < 0\n");
+        result = BadMatch;
+        goto EXIT;
+    }
+    //BUG_RETURN_VAL(listener >= ti->num_listeners, BadMatch);
+    if (listener >= ti->num_listeners) {
+        BUG_WARN_MSG(TRUE, "listener >= ti->num_listeners\n");
+        result = BadMatch;
+        goto EXIT;
+    }
 
     if (listener > 0) {
         if (mode == XIRejectTouch)
@@ -1021,11 +1134,16 @@ TouchListenerAcceptReject(DeviceIntPtr dev, TouchPointInfoPtr ti, int listener,
         else
             ti->listeners[listener].state = LISTENER_EARLY_ACCEPT;
 
-        return Success;
+        result = Success;
+        goto EXIT;
     }
 
     events = InitEventList(GetMaximumEventsNum());
-    BUG_RETURN_VAL_MSG(!events, BadAlloc, "Failed to allocate touch ownership events\n");
+    if (!events) {
+        BUG_WARN_MSG(TRUE, "Failed to allocate touch ownership events\n");
+        result = BadAlloc;
+        goto EXIT;
+    }
 
     nev = GetTouchOwnershipEvents(events, dev, ti, mode,
                                   ti->listeners[0].listener, 0);
@@ -1036,7 +1154,10 @@ TouchListenerAcceptReject(DeviceIntPtr dev, TouchPointInfoPtr ti, int listener,
 
     FreeEventList(events, GetMaximumEventsNum());
 
-    return nev ? Success : BadMatch;
+    result = nev ? Success : BadMatch;
+    EXIT:
+    DanStackDown;
+    return result;
 }
 
 int
@@ -1109,6 +1230,9 @@ TouchEndPhysicallyActiveTouches(DeviceIntPtr dev)
 void
 TouchEmitTouchEnd(DeviceIntPtr dev, TouchPointInfoPtr ti, int flags, XID resource)
 {
+    DanStackUp;
+    DanLog("\n");
+
     InternalEvent event;
 
     /* We're not processing a touch end for a frozen device */
@@ -1123,6 +1247,8 @@ TouchEmitTouchEnd(DeviceIntPtr dev, TouchPointInfoPtr ti, int flags, XID resourc
     DeliverTouchEvents(dev, ti, &event, resource);
     if (ti->num_grabs == 0)
         UpdateDeviceState(dev, &event.device_event);
+
+    DanStackDown;
 }
 
 void

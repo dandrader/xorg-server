@@ -392,6 +392,63 @@ XIClientCallback(CallbackListPtr *list, pointer closure, pointer data)
     pXIClient->minor_version = 0;
 }
 
+static const char *IndexToProcStr(int proc_index)
+{
+    switch (proc_index)
+    {
+        case 1:
+            return "XGetExtensionVersion";       /*  1 */
+        case 2:
+           return "XListInputDevices";  /*  2 */
+        case 3:
+           return "XOpenDevice";        /*  3 */
+        case 40:
+            return "XIQueryPointer";
+        case 41:
+            return "XIWarpPointer";                      /* 41 */
+        case 42:
+            return "XIChangeCursor";                     /* 42 */
+        case 43:
+            return "XIChangeHierarchy";                  /* 43 */
+        case 44:
+            return "XISetClientPointer";                 /* 44 */
+        case 45:
+            return "XIGetClientPointer";                 /* 45 */
+        case 46:
+            return "XISelectEvents";                     /* 46 */
+        case 47:
+            return "XIQueryVersion";                     /* 47 */
+        case 48:
+            return "XIQueryDevice";                      /* 48 */
+        case 49:
+            return "XISetFocus";                         /* 49 */
+        case 50:
+            return "XIGetFocus";                         /* 50 */
+        case 51:
+            return "XIGrabDevice";                       /* 51 */
+        case 52:
+            return "XIUngrabDevice";                     /* 52 */
+        case 53:
+            return "XIAllowEvents";                      /* 53 */
+        case 54:
+            return "XIPassiveGrabDevice";                /* 54 */
+        case 55:
+            return "XIPassiveUngrabDevice";              /* 55 */
+        case 56:
+            return "XIListProperties";                   /* 56 */
+        case 57:
+            return "XIChangeProperty";                   /* 57 */
+        case 58:
+            return "XIDeleteProperty";                   /* 58 */
+        case 59:
+            return "XIGetProperty";                      /* 59 */
+        case 60:
+            return "XIGetSelectedEvents";                 /* 60 */
+        default:
+            return 0;
+    }
+}
+
 /*************************************************************************
  *
  * ProcIDispatch - main dispatch routine for requests to this extension.
@@ -402,11 +459,31 @@ XIClientCallback(CallbackListPtr *list, pointer closure, pointer data)
 static int
 ProcIDispatch(ClientPtr client)
 {
+    int result;
     REQUEST(xReq);
-    if (stuff->data >= ARRAY_SIZE(ProcIVector) || !ProcIVector[stuff->data])
-        return BadRequest;
+    const char *procStr = IndexToProcStr(stuff->data);
+    DanStackUp;
 
-    return (*ProcIVector[stuff->data]) (client);
+    if (procStr)
+    {
+        DanLog("client[%d, %s %s] - %s\n",
+               GetClientPid(client), GetClientCmdName(client), GetClientCmdArgs(client),
+               procStr);
+    }
+    else
+    {
+        DanLog("client[%d, %s %s] - proc %d\n",
+               GetClientPid(client), GetClientCmdName(client), GetClientCmdArgs(client),
+               stuff->data);
+    }
+
+    if (stuff->data >= ARRAY_SIZE(ProcIVector) || !ProcIVector[stuff->data])
+        result = BadRequest;
+    else
+        result = (*ProcIVector[stuff->data])(client);
+
+    DanStackDown;
+    return result;
 }
 
 /*******************************************************************************

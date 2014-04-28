@@ -564,8 +564,14 @@ AddPassiveGrabToList(ClientPtr client, GrabPtr pGrab)
 
     pGrab->next = pGrab->window->optional->passiveGrabs;
     pGrab->window->optional->passiveGrabs = pGrab;
-    if (AddResource(pGrab->resource, RT_PASSIVEGRAB, (pointer) pGrab))
+    if (AddResource(pGrab->resource, RT_PASSIVEGRAB, (pointer) pGrab)) {
+        DanStackUp;
+        char grabStr[300];
+        DanPrintGrab(grabStr, pGrab);
+        DanLog("client=%d %s\n", GetClientPid(client), grabStr);
+        DanStackDown;
         return Success;
+    }
     return BadAlloc;
 }
 

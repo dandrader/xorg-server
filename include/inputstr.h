@@ -670,4 +670,82 @@ struct _XI2Mask {
     size_t mask_size;           /* size of each mask in bytes */
 };
 
+static inline const char *DanListenerTypeToStr(enum TouchListenerType type)
+{
+    switch (type) {
+    case LISTENER_GRAB:
+        return "grab";
+        break;
+
+    case LISTENER_POINTER_GRAB:
+        return "pointer_grab";
+        break;
+
+    case LISTENER_REGULAR:
+        return "regular";
+        break;
+
+    case LISTENER_POINTER_REGULAR:
+        return "pointer_regular";
+        break;
+
+    default:
+        return "invalid!";
+        break;
+    }
+}
+static inline const char *DanListenerStateToStr(enum TouchListenerState state)
+{
+    switch (state) {
+
+    case LISTENER_AWAITING_BEGIN:
+        return "begin";
+        break;
+    case LISTENER_AWAITING_OWNER:
+        return "awaiting_owner";
+        break;
+    case LISTENER_EARLY_ACCEPT:
+        return "early_accept";
+        break;
+    case LISTENER_IS_OWNER:
+        return "is_owner";
+        break;
+    case LISTENER_HAS_ACCEPTED:
+        return "has_accepted";
+        break;
+    case LISTENER_HAS_END:
+        return "has_end";
+        break;
+    default:
+        return "invalid!";
+        break;
+    }
+}
+static inline const char *DanInputLevelToStr(enum InputLevel level)
+{
+    switch (level) {
+    case CORE:
+        return "core";
+        break;
+    case XI:
+        return "xi";
+        break;
+    case XI2:
+        return "xi2";
+        break;
+    default:
+        return "invalid!";
+        break;
+    }
+}
+
+void DanPrintTouchListener(char *buffer, TouchListener *listener);
+void DanPrintCoreEventType(char *buffer, int type);
+void DanPrintXIEventType(char *buffer, int type);
+void DanPrintXI2EventType(char *buffer, int type);
+void DanPrintXI2Mask(char *buffer, XI2Mask *mask, const DeviceIntPtr dev);
+void DanPrintGrab(char *buffer, GrabPtr grab);
+void DanPrintGrabInfo(char *buffer, GrabInfoPtr grabInfo);
+void DanLogDetailAllDeviceGrabs(void);
+
 #endif                          /* INPUTSTRUCT_H */

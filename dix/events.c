@@ -1512,11 +1512,27 @@ void
 ActivatePointerGrab(DeviceIntPtr mouse, GrabPtr grab,
                     TimeStamp time, Bool autoGrab)
 {
+    ClientPtr client;
     GrabInfoPtr grabinfo = &mouse->deviceGrab;
     GrabPtr oldgrab = grabinfo->grab;
     WindowPtr oldWin = (grabinfo->grab) ?
         grabinfo->grab->window : mouse->spriteInfo->sprite->win;
     Bool isPassive = autoGrab & ~ImplicitGrabMask;
+
+    DanStackUp;
+    client = clients[CLIENT_ID(grab->resource)];
+    if (client)
+    {
+        int window_id = 0;
+        if (grab->window)
+            window_id = grab->window->drawable.id;
+
+        DanLog("client[%d,%s %s] on window %#x\n",
+               GetClientPid(client),
+               GetClientCmdName(client),
+               GetClientCmdArgs(client),
+               window_id);
+    }
 
     /* slave devices need to float for the duration of the grab. */
     if (grab->grabtype == XI2 &&
@@ -1545,6 +1561,8 @@ ActivatePointerGrab(DeviceIntPtr mouse, GrabPtr grab,
                       (Bool) grab->keyboardMode);
     if (oldgrab)
         FreeGrab(oldgrab);
+
+    DanStackDown;
 }
 
 /**
@@ -1556,12 +1574,32 @@ void
 DeactivatePointerGrab(DeviceIntPtr mouse)
 {
     GrabPtr grab = mouse->deviceGrab.grab;
+    ClientPtr client;
     DeviceIntPtr dev;
     Bool wasPassive = mouse->deviceGrab.fromPassiveGrab;
     Bool wasImplicit = (mouse->deviceGrab.fromPassiveGrab &&
                         mouse->deviceGrab.implicitGrab);
     XID grab_resource = grab->resource;
     int i;
+
+    DanStackUp;
+    client = clients[CLIENT_ID(grab->resource)];
+    if (client)
+    {
+        int window_id = 0;
+        if (grab && grab->window)
+            window_id = grab->window->drawable.id;
+
+        DanLog("client[%d,%s %s] on window %#x\n",
+               GetClientPid(client),
+               GetClientCmdName(client),
+               GetClientCmdArgs(client),
+               window_id);
+    }
+    else
+    {
+        DanLog("no client for mouse->deviceGrab.grab->resource!\n");
+    }
 
     /* If an explicit grab was deactivated, we must remove it from the head of
      * all the touches' listener lists. */
@@ -1608,6 +1646,8 @@ DeactivatePointerGrab(DeviceIntPtr mouse)
     ComputeFreezes();
 
     FreeGrab(grab);
+
+    DanStackDown;
 }
 
 /**
@@ -1780,7 +1820,10 @@ AllowSome(ClientPtr client, TimeStamp time, DeviceIntPtr thisDev, int newState)
                 grabinfo->sync.other = NullGrab;
             syncEvents.replayDev = thisDev;
             syncEvents.replayWin = grabinfo->grab->window;
+            DanStackUp;
+            DanLog(" - case NOT_GRABBED\n");
             (*grabinfo->DeactivateGrab) (thisDev);
+            DanStackDown;
             syncEvents.replayDev = (DeviceIntPtr) NULL;
         }
         break;
@@ -1881,7 +1924,10 @@ ReleaseActiveGrabs(ClientPtr client)
         for (dev = inputInfo.devices; dev; dev = dev->next) {
             if (dev->deviceGrab.grab &&
                 SameClient(dev->deviceGrab.grab, client)) {
+                DanStackUp;
+                DanLog("\n");
                 (*dev->deviceGrab.DeactivateGrab) (dev);
+                DanStackDown;
                 done = FALSE;
             }
         }
@@ -2078,13 +2124,24 @@ static enum EventDeliveryState
 DeliverToWindowOwner(DeviceIntPtr dev, WindowPtr win,
                      xEvent *events, int count, Mask filter, GrabPtr grab)
 {
+    enum EventDeliveryState result = EVENT_NOT_DELIVERED;
+    DanStackUp;
+    DanMayLog("\n");
     /* if nobody ever wants to see this event, skip some work */
     if (filter != CantBeFiltered &&
         !((wOtherEventMasks(win) | win->eventMask) & filter))
-        return EVENT_SKIP;
+    {
+        result = EVENT_SKIP;
+        goto EXIT;
+    }
 
     if (IsInterferingGrab(wClient(win), dev, events))
-        return EVENT_SKIP;
+    {
+        DanLogDetail("Skip because IsInterferingGrab()\n");
+        DanLogDetailAllDeviceGrabs();
+        result = EVENT_SKIP;
+        goto EXIT;
+    }
 
     if (!XaceHook(XACE_RECEIVE_ACCESS, wClient(win), win, events, count)) {
         int attempt = TryClientEvents(wClient(win), dev, events,
@@ -2092,12 +2149,20 @@ DeliverToWindowOwner(DeviceIntPtr dev, WindowPtr win,
                                       filter, grab);
 
         if (attempt > 0)
-            return EVENT_DELIVERED;
+        {
+            result = EVENT_DELIVERED;
+            goto EXIT;
+        }
         if (attempt < 0)
-            return EVENT_REJECTED;
+        {
+            result = EVENT_REJECTED;
+            goto EXIT;
+        }
     }
 
-    return EVENT_NOT_DELIVERED;
+    EXIT:
+    DanStackDown;
+    return result;
 }
 
 /**
@@ -2205,13 +2270,22 @@ DeliverEventToWindowMask(DeviceIntPtr dev, WindowPtr win, xEvent *events,
                          ClientPtr *client_return, Mask *mask_return)
 {
     InputClients *iclients;
+    enum EventDeliveryState result;
+    DanStackUp;
+    DanMayLog("\n");
 
     if (!GetClientsForDelivery(dev, win, events, filter, &iclients))
-        return EVENT_SKIP;
+    {
+        result = EVENT_SKIP;
+        goto EXIT;
+    }
 
-    return DeliverEventToInputClients(dev, iclients, win, events, count, filter,
+    result = DeliverEventToInputClients(dev, iclients, win, events, count, filter,
                                       grab, client_return, mask_return);
 
+    EXIT:
+    DanStackDown;
+    return result;
 }
 
 /**
@@ -2245,6 +2319,8 @@ DeliverEventsToWindow(DeviceIntPtr pDev, WindowPtr pWin, xEvent
     Mask deliveryMask = 0;      /* If a grab occurs due to a button press, then
                                    this mask is the mask of the grab. */
     int type = pEvents->u.u.type;
+    DanStackUp;
+    DanMayLog("\n");
 
     /* Deliver to window owner */
     if ((filter == CantBeFiltered) || core_get_type(pEvents) != 0) {
@@ -2254,7 +2330,8 @@ DeliverEventsToWindow(DeviceIntPtr pDev, WindowPtr pWin, xEvent
 
         switch (rc) {
         case EVENT_SKIP:
-            return 0;
+            deliveries = nondeliveries = 0;
+            goto EXIT;
         case EVENT_REJECTED:
             nondeliveries--;
             break;
@@ -2278,7 +2355,8 @@ DeliverEventsToWindow(DeviceIntPtr pDev, WindowPtr pWin, xEvent
 
         switch (rc) {
         case EVENT_SKIP:
-            return 0;
+            deliveries = nondeliveries = 0;
+            goto EXIT;
         case EVENT_REJECTED:
             nondeliveries--;
             break;
@@ -2304,9 +2382,14 @@ DeliverEventsToWindow(DeviceIntPtr pDev, WindowPtr pWin, xEvent
             CheckDeviceGrabAndHintWindow(pWin, type,
                                          (deviceKeyButtonPointer *) pEvents,
                                          grab, client, deliveryMask);
-        return deliveries;
     }
-    return nondeliveries;
+
+    EXIT:
+    DanStackDown;
+    if (deliveries)
+        return deliveries;
+    else
+        return nondeliveries;
 }
 
 /**
@@ -2597,6 +2680,7 @@ EventIsDeliverable(DeviceIntPtr dev, int evtype, WindowPtr win)
     int filter = 0;
     int type;
     OtherInputMasks *inputMasks = wOtherInputMasks(win);
+    DanStackUp;
 
     if ((type = GetXI2Type(evtype)) != 0) {
         if (inputMasks && xi2mask_isset(inputMasks->xi2mask, dev, type))
@@ -2631,6 +2715,8 @@ EventIsDeliverable(DeviceIntPtr dev, int evtype, WindowPtr win)
             rc |= EVENT_DONT_PROPAGATE_MASK;
     }
 
+    DanLog("rc=%d\n", rc);
+    DanStackDown;
     return rc;
 }
 
@@ -2710,6 +2796,8 @@ DeliverDeviceEvents(WindowPtr pWin, InternalEvent *event, GrabPtr grab,
     Window child = None;
     int deliveries = 0;
     int mask;
+    DanStackUp;
+    DanLog("\n");
 
     verify_internal_event(event);
 
@@ -2750,6 +2838,7 @@ DeliverDeviceEvents(WindowPtr pWin, InternalEvent *event, GrabPtr grab,
         pWin = pWin->parent;
     }
 
+    DanStackDown;
     return deliveries;
 }
 
@@ -2938,7 +3027,10 @@ ActivateFocusInGrab(DeviceIntPtr dev, WindowPtr old, WindowPtr win)
             IsParent(dev->deviceGrab.grab->window, win))
             return FALSE;
         DoEnterLeaveEvents(dev, dev->id, old, win, XINotifyPassiveUngrab);
+        DanStackUp;
+        DanLog("\n");
         (*dev->deviceGrab.DeactivateGrab) (dev);
+        DanStackDown;
     }
 
     if (win == NoneWin || win == PointerRootWin)
@@ -2979,7 +3071,10 @@ ActivateEnterGrab(DeviceIntPtr dev, WindowPtr old, WindowPtr win)
             IsParent(dev->deviceGrab.grab->window, win))
             return FALSE;
         DoEnterLeaveEvents(dev, dev->id, old, win, XINotifyPassiveUngrab);
+        DanStackUp;
+        DanLog("\n");
         (*dev->deviceGrab.DeactivateGrab) (dev);
+        DanStackDown;
     }
 
     event = (DeviceEvent) {
@@ -3694,6 +3789,9 @@ ActivatePassiveGrab(DeviceIntPtr device, GrabPtr grab, InternalEvent *event,
     xEvent *xE = NULL;
     int count;
     int rc;
+    Bool result = FALSE;
+    DanStackUp;
+    DanLog("\n");
 
     /* The only consumers of corestate are Xi 1.x and core events, which
      * are guaranteed to come from DeviceEvents. */
@@ -3717,7 +3815,7 @@ ActivatePassiveGrab(DeviceIntPtr device, GrabPtr grab, InternalEvent *event,
         if (rc != Success) {
             BUG_WARN_MSG(rc != BadMatch, "[dix] %s: core conversion failed"
                          "(%d, %d).\n", device->name, event->any.type, rc);
-            return FALSE;
+            goto EXIT;
         }
     }
     else if (grab->grabtype == XI2) {
@@ -3726,7 +3824,7 @@ ActivatePassiveGrab(DeviceIntPtr device, GrabPtr grab, InternalEvent *event,
             if (rc != BadMatch)
                 BUG_WARN_MSG(rc != BadMatch, "[dix] %s: XI2 conversion failed"
                              "(%d, %d).\n", device->name, event->any.type, rc);
-            return FALSE;
+            goto EXIT;
         }
         count = 1;
     }
@@ -3736,7 +3834,7 @@ ActivatePassiveGrab(DeviceIntPtr device, GrabPtr grab, InternalEvent *event,
             if (rc != BadMatch)
                 BUG_WARN_MSG(rc != BadMatch, "[dix] %s: XI conversion failed"
                              "(%d, %d).\n", device->name, event->any.type, rc);
-            return FALSE;
+            goto EXIT;
         }
     }
 
@@ -3757,7 +3855,9 @@ ActivatePassiveGrab(DeviceIntPtr device, GrabPtr grab, InternalEvent *event,
     *grabinfo->sync.event = real_event->device_event;
 
     free(xE);
-    return TRUE;
+    EXIT:
+    DanStackDown;
+    return result;
 }
 
 static BOOL
@@ -4186,9 +4286,11 @@ DeliverOneGrabbedEvent(InternalEvent *event, DeviceIntPtr dev,
     GrabInfoPtr grabinfo = &dev->deviceGrab;
     GrabPtr grab = grabinfo->grab;
     Mask filter;
+    DanStackUp;
+    DanLog("\n");
 
     if (grab->grabtype != level)
-        return 0;
+        goto EXIT;
 
     switch (level) {
     case XI2:
@@ -4218,7 +4320,7 @@ DeliverOneGrabbedEvent(InternalEvent *event, DeviceIntPtr dev,
         break;
     default:
         BUG_WARN_MSG(1, "Invalid input level %d\n", level);
-        return 0;
+        goto EXIT;
     }
 
     if (rc == Success) {
@@ -4239,6 +4341,9 @@ DeliverOneGrabbedEvent(InternalEvent *event, DeviceIntPtr dev,
                      dev->name, level, event->any.type, rc);
 
     free(xE);
+    EXIT:
+    if (deliveries == 0) { DanLogDetail("Did not deliver anything.\n"); }
+    DanStackDown;
     return deliveries;
 }
 
@@ -5031,7 +5136,12 @@ ProcUngrabPointer(ClientPtr client)
     if ((CompareTimeStamps(time, currentTime) != LATER) &&
         (CompareTimeStamps(time, device->deviceGrab.grabTime) != EARLIER) &&
         (grab) && SameClient(grab, client))
+    {
+        DanStackUp;
+        DanLog("\n");
         (*device->deviceGrab.DeactivateGrab) (device);
+        DanStackDown;
+    }
     return Success;
 }
 
@@ -5114,20 +5224,36 @@ GrabDevice(ClientPtr client, DeviceIntPtr dev,
 
     time = ClientTimeToServerTime(ctime);
     grab = grabInfo->grab;
+    DanStackUp;
     if (grab && grab->grabtype != grabtype)
+    {
         *status = AlreadyGrabbed;
+        DanLog("device id %d, AlreadyGrabbed\n", dev->id);
+    }
     else if (grab && !SameClient(grab, client))
+    {
         *status = AlreadyGrabbed;
+        DanLog("device id %d, AlreadyGrabbed\n", dev->id);
+    }
     else if ((!pWin->realized) ||
              (confineTo &&
               !(confineTo->realized && BorderSizeNotEmpty(dev, confineTo))))
+    {
         *status = GrabNotViewable;
+        DanLog("device id %d, GrabNotViewable\n", dev->id);
+    }
     else if ((CompareTimeStamps(time, currentTime) == LATER) ||
              (CompareTimeStamps(time, grabInfo->grabTime) == EARLIER))
+    {
         *status = GrabInvalidTime;
+        DanLog("device id %d, GrabInvalidTime\n", dev->id);
+    }
     else if (grabInfo->sync.frozen &&
              grabInfo->sync.other && !SameClient(grabInfo->sync.other, client))
+    {
         *status = GrabFrozen;
+        DanLog("device id %d, GrabFrozen\n", dev->id);
+    }
     else {
         GrabPtr tempGrab;
 
@@ -5149,11 +5275,19 @@ GrabDevice(ClientPtr client, DeviceIntPtr dev,
         tempGrab->cursor = RefCursor(cursor);
         tempGrab->confineTo = confineTo;
         tempGrab->grabtype = grabtype;
+
+        {
+            char buffer[500];
+            DanPrintGrab(buffer, tempGrab);
+            DanLog("device id %d, %s\n", dev->id, buffer);
+        }
+
         (*grabInfo->ActivateGrab) (dev, tempGrab, time, FALSE);
         *status = GrabSuccess;
 
         FreeGrab(tempGrab);
     }
+    DanStackDown;
     return Success;
 }
 
@@ -6000,6 +6134,163 @@ WriteEventsToClient(ClientPtr pClient, int count, xEvent *events)
         eventlength += ((xGenericEvent *) events)->length * 4;
     }
 
+    { // DANDRADER start
+    int old_dandrader_logging = dandrader_logging;
+    dandrader_logging = 1;
+    DanStackUp;
+    if (events->u.u.type == ButtonPress)
+    {
+        DanLog("client id %d, name %s - ButtonPress window %#x\n",
+               GetClientPid(pClient), GetClientCmdName(pClient),
+               events->u.keyButtonPointer.event);
+    }
+    else if (events->u.u.type == ButtonRelease)
+    {
+        DanLog("client id %d, name %s - ButtonRelease window %#x\n",
+               GetClientPid(pClient), GetClientCmdName(pClient),
+               events->u.keyButtonPointer.event);
+    }
+    else if (events->u.u.type == MotionNotify)
+    {
+        DanLog("client id %d, name %s - MotionNotify window %#x\n",
+               GetClientPid(pClient), GetClientCmdName(pClient),
+               events->u.keyButtonPointer.event);
+    }
+    else if (events->u.u.type == DeviceButtonPress)
+    {
+        DanLog("client id %d, name %s - DeviceButtonPress window %#x\n",
+               GetClientPid(pClient), GetClientCmdName(pClient),
+               events->u.keyButtonPointer.event);
+    }
+    else if (events->u.u.type == DeviceButtonRelease)
+    {
+        DanLog("client id %d, name %s - DeviceButtonRelease window %#x\n",
+               GetClientPid(pClient), GetClientCmdName(pClient),
+               events->u.keyButtonPointer.event);
+    }
+    else if (events->u.u.type == GenericEvent && xi2_get_type(events) != 0)
+    {
+        xGenericEvent *generic_ev = (xGenericEvent*) events;
+        const char *event_name = 0;
+        char event_name_buffer[100];
+        const char *detail_type = 0;
+        int detail = -1;
+        int window_id = 0;
+        switch (generic_ev->evtype)
+        {
+            case XI_DeviceChanged:
+                event_name = "DeviceChanged";
+                detail_type = "?";
+                window_id = ((xXIDeviceEvent*)generic_ev)->event;
+                break;
+            case XI_ButtonPress:
+                {
+                    xXIDeviceEvent *device_ev = (xXIDeviceEvent*) generic_ev;
+                    if (device_ev->flags & XITouchEmulatingPointer)
+                        event_name = "ButtonPress(touch emulating pointer)";
+                    else
+                        event_name = "ButtonPress";
+                    detail_type = "button";
+                    detail = device_ev->detail;
+                    window_id = device_ev->event;
+                }
+                break;
+            case XI_ButtonRelease:
+                {
+                    xXIDeviceEvent *device_ev = (xXIDeviceEvent*) generic_ev;
+                    if (device_ev->flags & XITouchEmulatingPointer)
+                        event_name = "ButtonRelease(touch emulating pointer)";
+                    else
+                        event_name = "ButtonRelease";
+                    detail_type = "button";
+                    detail = device_ev->detail;
+                    window_id = device_ev->event;
+                }
+                break;
+            case XI_Motion:
+                {
+                    xXIDeviceEvent *device_ev = (xXIDeviceEvent*) generic_ev;
+                    if (device_ev->flags & XITouchEmulatingPointer)
+                        event_name = "Motion(touch emulating pointer)";
+                    else
+                        event_name = "Motion";
+                    detail_type = "button";
+                    detail = device_ev->detail;
+                    window_id = device_ev->event;
+                }
+                break;
+            case XI_Enter:
+                event_name = "Enter";
+                detail_type = "?";
+                window_id = ((xXIDeviceEvent*)generic_ev)->event;
+                break;
+            case XI_Leave:
+                event_name = "Leave";
+                detail_type = "?";
+                window_id = ((xXIDeviceEvent*)generic_ev)->event;
+                break;
+            case XI_FocusIn:
+                event_name = "FocusIn";
+                detail_type = "?";
+                window_id = ((xXIDeviceEvent*)generic_ev)->event;
+                break;
+            case XI_FocusOut:
+                event_name = "FocusOut";
+                detail_type = "?";
+                window_id = ((xXIDeviceEvent*)generic_ev)->event;
+                break;
+            case XI_TouchBegin:
+                event_name = "TouchBegin";
+                detail_type = "touch";
+                detail = ((xXIDeviceEvent*)generic_ev)->detail;
+                window_id = ((xXIDeviceEvent*)generic_ev)->event;
+                break;
+            case XI_TouchUpdate:
+                {
+                xXIDeviceEvent *device_ev = (xXIDeviceEvent*) generic_ev;
+                detail_type = "touch";
+                detail = device_ev->detail;
+                window_id = ((xXIDeviceEvent*)generic_ev)->event;
+                if (device_ev->flags & XITouchPendingEnd)
+                    event_name = "TouchUpdate(pending end)";
+                else
+                    event_name = "TouchUpdate";
+                }
+                break;
+            case XI_TouchEnd:
+                event_name = "TouchEnd";
+                detail_type = "touch";
+                detail = ((xXIDeviceEvent*)generic_ev)->detail;
+                window_id = ((xXIDeviceEvent*)generic_ev)->event;
+                break;
+            case XI_TouchOwnership:
+                event_name = "TouchOwnership";
+                detail_type = "touch";
+                detail = ((xXITouchOwnershipEvent*)generic_ev)->touchid;
+                window_id = ((xXITouchOwnershipEvent*)generic_ev)->event;
+                break;
+            default:
+                break;
+        }
+
+        if (!event_name)
+        {
+            sprintf(event_name_buffer, "evtype(%d)", generic_ev->evtype);
+            event_name = &event_name_buffer[0];
+            detail_type = "?";
+        }
+
+        if (event_name)
+        {
+          DanLog("client id %d, name %s - %s %s %d, window %#x\n",
+                 GetClientPid(pClient), GetClientCmdName(pClient), event_name,
+                              detail_type, detail, window_id);
+        }
+    }
+    DanStackDown;
+    dandrader_logging = old_dandrader_logging;
+    } // DANDRADER end
+
     if (pClient->swapped) {
         if (eventlength > swapEventLen) {
             swapEventLen = eventlength;
@@ -6172,4 +6463,300 @@ IsWrongPointerBarrierClient(ClientPtr client, DeviceIntPtr dev, xEvent *event)
         return FALSE;
 
     return client->index != CLIENT_ID(ev->barrier);
+}
+
+void
+DanPrintTouchListener(char *buffer, TouchListener *listener)
+{
+    ClientPtr client = clients[CLIENT_ID(listener->listener)];
+    sprintf(buffer, "listener(window=%#x, client[%d, %s %s], type=%s, state=%s, level=%s)",
+            listener->window->drawable.id,
+            GetClientPid(client), GetClientCmdName(client), GetClientCmdArgs(client),
+            DanListenerTypeToStr(listener->type),
+            DanListenerStateToStr(listener->state),
+            DanInputLevelToStr(listener->level));
+}
+
+void
+DanPrintCoreEventType(char *buffer, int type)
+{
+    #define DAN_PRINT_TYPE(expectedType) \
+    case expectedType:\
+        sprintf(buffer, #expectedType);\
+        break;
+
+    switch (type) {
+    DAN_PRINT_TYPE(KeyPress);
+    DAN_PRINT_TYPE(KeyRelease);
+    DAN_PRINT_TYPE(ButtonPress);
+    DAN_PRINT_TYPE(ButtonRelease);
+    DAN_PRINT_TYPE(MotionNotify);
+    DAN_PRINT_TYPE(EnterNotify);
+    DAN_PRINT_TYPE(LeaveNotify);
+    DAN_PRINT_TYPE(FocusIn);
+    DAN_PRINT_TYPE(FocusOut);
+    DAN_PRINT_TYPE(KeymapNotify);
+    DAN_PRINT_TYPE(Expose);
+    DAN_PRINT_TYPE(GraphicsExpose);
+    DAN_PRINT_TYPE(NoExpose);
+    DAN_PRINT_TYPE(VisibilityNotify);
+    DAN_PRINT_TYPE(CreateNotify);
+    DAN_PRINT_TYPE(DestroyNotify);
+    DAN_PRINT_TYPE(UnmapNotify);
+    DAN_PRINT_TYPE(MapNotify);
+    DAN_PRINT_TYPE(MapRequest);
+    DAN_PRINT_TYPE(ReparentNotify);
+    DAN_PRINT_TYPE(ConfigureNotify);
+    DAN_PRINT_TYPE(ConfigureRequest);
+    DAN_PRINT_TYPE(GravityNotify);
+    DAN_PRINT_TYPE(ResizeRequest);
+    DAN_PRINT_TYPE(CirculateNotify);
+    DAN_PRINT_TYPE(CirculateRequest);
+    DAN_PRINT_TYPE(PropertyNotify);
+    DAN_PRINT_TYPE(SelectionClear);
+    DAN_PRINT_TYPE(SelectionRequest);
+    DAN_PRINT_TYPE(SelectionNotify);
+    DAN_PRINT_TYPE(ColormapNotify);
+    DAN_PRINT_TYPE(ClientMessage);
+    DAN_PRINT_TYPE(MappingNotify);
+    DAN_PRINT_TYPE(GenericEvent);
+    default:
+        buffer[0] = 0;
+        break;
+    }
+
+    #undef DAN_PRINT_TYPE
+}
+
+void
+DanPrintXIEventType(char *buffer, int type)
+{
+    buffer[0] = 0;
+
+    #define DAN_PRINT_TYPE(expectedType) \
+    if (type == expectedType) \
+    {\
+        sprintf(buffer, #expectedType);\
+        return;\
+    }
+
+    DAN_PRINT_TYPE(DeviceValuator);
+    DAN_PRINT_TYPE(DeviceKeyPress);
+    DAN_PRINT_TYPE(DeviceKeyRelease);
+    DAN_PRINT_TYPE(DeviceButtonPress);
+    DAN_PRINT_TYPE(DeviceButtonRelease);
+    DAN_PRINT_TYPE(DeviceMotionNotify);
+    DAN_PRINT_TYPE(DeviceFocusIn);
+    DAN_PRINT_TYPE(DeviceFocusOut);
+    DAN_PRINT_TYPE(ProximityIn);
+    DAN_PRINT_TYPE(ProximityOut);
+    DAN_PRINT_TYPE(DeviceStateNotify);
+    DAN_PRINT_TYPE(DeviceKeyStateNotify);
+    DAN_PRINT_TYPE(DeviceButtonStateNotify);
+    DAN_PRINT_TYPE(DeviceMappingNotify);
+    DAN_PRINT_TYPE(ChangeDeviceNotify);
+    DAN_PRINT_TYPE(DevicePresenceNotify);
+    DAN_PRINT_TYPE(DevicePropertyNotify);
+
+    #undef DAN_PRINT_TYPE
+}
+
+void
+DanPrintXI2EventType(char *buffer, int type)
+{
+
+    #define DAN_PRINT_TYPE(expectedType) \
+    case expectedType:\
+        sprintf(buffer, #expectedType);\
+        break;
+
+    switch (type) {
+    DAN_PRINT_TYPE(XI_DeviceChanged);
+    DAN_PRINT_TYPE(XI_KeyPress);
+    DAN_PRINT_TYPE(XI_KeyRelease);
+    DAN_PRINT_TYPE(XI_ButtonPress);
+    DAN_PRINT_TYPE(XI_ButtonRelease);
+    DAN_PRINT_TYPE(XI_Motion);
+    DAN_PRINT_TYPE(XI_Enter);
+    DAN_PRINT_TYPE(XI_Leave);
+    DAN_PRINT_TYPE(XI_FocusIn);
+    DAN_PRINT_TYPE(XI_FocusOut);
+    DAN_PRINT_TYPE(XI_HierarchyChanged);
+    DAN_PRINT_TYPE(XI_PropertyEvent);
+    DAN_PRINT_TYPE(XI_RawKeyPress);
+    DAN_PRINT_TYPE(XI_RawKeyRelease);
+    DAN_PRINT_TYPE(XI_RawButtonPress);
+    DAN_PRINT_TYPE(XI_RawButtonRelease);
+    DAN_PRINT_TYPE(XI_RawMotion);
+    DAN_PRINT_TYPE(XI_TouchBegin);
+    DAN_PRINT_TYPE(XI_TouchUpdate);
+    DAN_PRINT_TYPE(XI_TouchEnd);
+    DAN_PRINT_TYPE(XI_TouchOwnership);
+    DAN_PRINT_TYPE(XI_RawTouchBegin);
+    DAN_PRINT_TYPE(XI_RawTouchUpdate);
+    DAN_PRINT_TYPE(XI_RawTouchEnd);
+    DAN_PRINT_TYPE(XI_BarrierHit);
+    DAN_PRINT_TYPE(XI_BarrierLeave);
+    default:
+        buffer[0] = 0;
+        break;
+    }
+
+    #undef DAN_PRINT_TYPE
+}
+
+void
+DanPrintXI2Mask(char *buffer, XI2Mask *mask, const DeviceIntPtr dev)
+{
+    buffer[0] = 0;
+
+    #define DAN_PRINT_MASK(eventType) \
+    if (xi2mask_isset_for_device(mask, dev, eventType))\
+    {\
+        if (buffer[0] != 0) strcat(buffer, "|");\
+        strcat(buffer, #eventType);\
+    }
+    DAN_PRINT_MASK(XI_DeviceChanged);
+    DAN_PRINT_MASK(XI_KeyPress);
+    DAN_PRINT_MASK(XI_KeyRelease);
+    DAN_PRINT_MASK(XI_ButtonPress);
+    DAN_PRINT_MASK(XI_ButtonRelease);
+    DAN_PRINT_MASK(XI_Motion);
+    DAN_PRINT_MASK(XI_Enter);
+    DAN_PRINT_MASK(XI_Leave);
+    DAN_PRINT_MASK(XI_FocusIn);
+    DAN_PRINT_MASK(XI_FocusOut);
+    DAN_PRINT_MASK(XI_HierarchyChanged);
+    DAN_PRINT_MASK(XI_PropertyEvent);
+    DAN_PRINT_MASK(XI_RawKeyPress);
+    DAN_PRINT_MASK(XI_RawKeyRelease);
+    DAN_PRINT_MASK(XI_RawButtonPress);
+    DAN_PRINT_MASK(XI_RawButtonRelease);
+    DAN_PRINT_MASK(XI_RawMotion);
+    DAN_PRINT_MASK(XI_TouchBegin);
+    DAN_PRINT_MASK(XI_TouchUpdate);
+    DAN_PRINT_MASK(XI_TouchEnd);
+    DAN_PRINT_MASK(XI_TouchOwnership);
+    DAN_PRINT_MASK(XI_RawTouchBegin);
+    DAN_PRINT_MASK(XI_RawTouchUpdate);
+    DAN_PRINT_MASK(XI_RawTouchEnd);
+    DAN_PRINT_MASK(XI_BarrierHit);
+    DAN_PRINT_MASK(XI_BarrierLeave);
+    #undef DAN_PRINT_MASK
+}
+
+void
+DanPrintCoreEventMask(char *buffer, Mask eventMask)
+{
+    buffer[0] = 0;
+
+    #define DAN_PRINT_MASK(expectedMask) \
+    if (eventMask & expectedMask##Mask)\
+    {\
+        if (buffer[0] != 0) {strcat(buffer, "|");}\
+        strcat(buffer, #expectedMask);\
+    }
+
+    DAN_PRINT_MASK(KeyPress);
+    DAN_PRINT_MASK(KeyRelease);
+    DAN_PRINT_MASK(ButtonPress);
+    DAN_PRINT_MASK(ButtonRelease);
+    DAN_PRINT_MASK(EnterWindow);
+    DAN_PRINT_MASK(LeaveWindow);
+    DAN_PRINT_MASK(PointerMotion);
+    DAN_PRINT_MASK(PointerMotionHint);
+    DAN_PRINT_MASK(Button1Motion);
+    DAN_PRINT_MASK(Button2Motion);
+    DAN_PRINT_MASK(Button3Motion);
+    DAN_PRINT_MASK(Button4Motion);
+    DAN_PRINT_MASK(Button5Motion);
+    DAN_PRINT_MASK(ButtonMotion);
+    DAN_PRINT_MASK(KeymapState);
+    DAN_PRINT_MASK(Exposure);
+    DAN_PRINT_MASK(VisibilityChange);
+    DAN_PRINT_MASK(StructureNotify);
+    DAN_PRINT_MASK(ResizeRedirect);
+    DAN_PRINT_MASK(SubstructureNotify);
+    DAN_PRINT_MASK(SubstructureRedirect);
+    DAN_PRINT_MASK(FocusChange);
+    DAN_PRINT_MASK(PropertyChange);
+    DAN_PRINT_MASK(ColormapChange);
+    DAN_PRINT_MASK(OwnerGrabButton);
+
+    #undef DAN_PRINT_MASK
+}
+
+void
+DanPrintGrab(char *buffer, GrabPtr grab)
+{
+    char typeBuffer[100];
+    char eventMaskBuffer[100];
+    ClientPtr client;
+
+    if (!grab)
+    {
+        sprintf(buffer, "no grab");
+        return;
+    }
+
+    client = rClient(grab);
+
+    if (grab->type <= 0) {
+        sprintf(typeBuffer, "active");
+    } else {
+        char valueBuffer[100];
+        if (grab->grabtype == CORE) {
+            DanPrintCoreEventType(valueBuffer, grab->type);
+        } else if (grab->grabtype == XI) {
+            DanPrintXIEventType(valueBuffer, grab->type);
+        } else if (grab->grabtype == XI2) {
+            DanPrintXI2EventType(valueBuffer, grab->type);
+        }
+        sprintf(typeBuffer, "passive, %s", valueBuffer);
+    }
+
+    if (grab->grabtype == CORE) {
+        DanPrintCoreEventMask(eventMaskBuffer, grab->eventMask);
+    } else if (grab->grabtype == XI2) {
+        DanPrintXI2Mask(eventMaskBuffer, grab->xi2mask, grab->device);
+    }
+
+    sprintf(buffer, "Grab(clientPid=%d, window=%#x, type=(%s), grabType=%s, eventMask=%s)",
+            GetClientPid(client),
+            grab->window->drawable.id,
+            typeBuffer,
+            DanInputLevelToStr(grab->grabtype),
+            eventMaskBuffer);
+}
+
+void
+DanPrintGrabInfo(char *buffer, GrabInfoPtr grabInfo)
+{
+    char grabBuffer[200];
+    DanPrintGrab(grabBuffer, grabInfo->grab);
+    sprintf(buffer, "GrabInfo(fromPassive=%d, implicit=%d, %s)",
+            grabInfo->fromPassiveGrab,
+            grabInfo->implicitGrab,
+            grabBuffer);
+}
+
+void
+DanLogDetailAllDeviceGrabs(void)
+{
+    DeviceIntPtr it = inputInfo.devices;
+    DanLogDetail("Device grabs:\n");
+    char deviceGrabBuffer[500];
+
+    while (it) {
+        if (it->deviceGrab.grab)
+        {
+            DanPrintGrabInfo(deviceGrabBuffer, &it->deviceGrab);
+
+            DanLogDetail("  id=%d %s\n",
+                    it->id,
+                    deviceGrabBuffer);
+        }
+
+        it = it->next;
+    }
 }

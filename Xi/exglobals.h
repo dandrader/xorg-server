@@ -82,4 +82,80 @@ extern DevPrivateKeyRec XIClientPrivateKeyRec;
 
 #define XIClientPrivateKey (&XIClientPrivateKeyRec)
 
+struct DanStackData {
+    char func[100];
+    int held_logs_count;
+};
+
+extern int dandrader_logging;
+extern int dandrader_stack;
+extern char dandrader_buffer[1000];
+extern char dandrader_indentation[100];
+extern char dandrader_stack_func[100][100];
+extern struct DanStackData dandrader_stack_data[100];
+extern char dandrader_held_logs[100][1000];
+extern int dandrader_held_logs_count;
+
+void DanApplyHeldLogs(void);
+
+#define DanStackUp \
+{\
+    ++dandrader_stack;\
+    sprintf(dandrader_stack_data[dandrader_stack].func, "%s", __func__);\
+    dandrader_stack_data[dandrader_stack].held_logs_count = dandrader_held_logs_count;\
+}
+
+#define DanStackDown \
+{\
+    if (strcmp(dandrader_stack_data[dandrader_stack].func, __func__) != 0)\
+    {\
+        LogMessageVerbSigSafe(X_INFO, 1, "DanLog Error!!! Inc '%s', dec '%s'",\
+                              dandrader_stack_data[dandrader_stack].func, __func__);\
+        abort();\
+    }\
+    else if (dandrader_stack == 0)\
+    {\
+        LogMessageVerbSigSafe(X_INFO, 1, "DanLog Error!!! dandrader_stack == 0");\
+        abort();\
+    }\
+    \
+    if (dandrader_stack_data[dandrader_stack].held_logs_count == 0)\
+    {\
+        /* Discard unapplied logs, if any */\
+        dandrader_held_logs_count = 0;\
+    }\
+    --dandrader_stack;\
+}
+
+#define DanLog(...) \
+  if (dandrader_logging)\
+  {\
+    DanApplyHeldLogs();\
+    sprintf(dandrader_buffer, __VA_ARGS__);\
+    memset(dandrader_indentation, ' ', dandrader_stack*2);\
+    dandrader_indentation[dandrader_stack*2] = '\0';\
+    LogMessageVerbSigSafe(X_INFO, 1, "%s%s: %s", dandrader_indentation, __func__, dandrader_buffer);\
+  }
+
+#define DanLogDetail(...) \
+  if (dandrader_logging)\
+  {\
+    DanApplyHeldLogs();\
+    sprintf(dandrader_buffer, __VA_ARGS__);\
+    memset(dandrader_indentation, ' ', (dandrader_stack+1)*2);\
+    dandrader_indentation[(dandrader_stack+1)*2] = '\0';\
+    LogMessageVerbSigSafe(X_INFO, 1, "%s- %s", dandrader_indentation, dandrader_buffer);\
+  }
+
+#define DanMayLog(...) \
+  if (dandrader_logging)\
+  {\
+    sprintf(dandrader_buffer, __VA_ARGS__);\
+    memset(dandrader_indentation, ' ', dandrader_stack*2);\
+    dandrader_indentation[dandrader_stack*2] = '\0';\
+    sprintf(dandrader_held_logs[dandrader_held_logs_count],\
+            "%s%s: %s", dandrader_indentation, __func__, dandrader_buffer);\
+    ++dandrader_held_logs_count;\
+  }
+
 #endif                          /* EXGLOBALS_H */

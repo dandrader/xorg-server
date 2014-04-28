@@ -96,6 +96,8 @@ Author:  Adobe Systems Incorporated
 #include <X11/keysymdef.h>
 #include "xace.h"
 
+#include "exglobals.h"
+
 /*
  * CompareTimeStamps returns -1, 0, or +1 depending on if the first
  * argument is less than, equal to or greater than the second argument.
@@ -261,26 +263,44 @@ dixLookupFontable(FontPtr *pFont, XID id, ClientPtr client, Mask access)
 int
 dixLookupClient(ClientPtr *pClient, XID rid, ClientPtr client, Mask access)
 {
+    DanStackUp;
     pointer pRes;
     int rc = BadValue, clientIndex = CLIENT_ID(rid);
 
-    if (!clientIndex || !clients[clientIndex] || (rid & SERVER_BIT))
-        goto bad;
+    if (!clientIndex) {
+        DanLog("failed! - !clientIndex\n");
+        goto EXIT;
+    }
+    if (!clients[clientIndex]) {
+        DanLog("failed! - !clients[clientIndex]\n");
+        goto EXIT;
+    }
+    if (rid & SERVER_BIT) {
+        DanLog("failed! - rid & SERVER_BIT\n");
+        goto EXIT;
+    }
 
     rc = dixLookupResourceByClass(&pRes, rid, RC_ANY, client, DixGetAttrAccess);
-    if (rc != Success)
-        goto bad;
+    if (rc != Success) {
+        DanLog("failed! - dixLookupResourceByClass()\n");
+        goto EXIT;
+    }
 
     rc = XaceHook(XACE_CLIENT_ACCESS, client, clients[clientIndex], access);
-    if (rc != Success)
-        goto bad;
+    if (rc != Success)  {
+        DanLog("failed! - XaceHook \n");
+        goto EXIT;
+    }
 
     *pClient = clients[clientIndex];
-    return Success;
- bad:
-    if (client)
-        client->errorValue = rid;
-    *pClient = NULL;
+    rc = Success;
+ EXIT:
+    if (rc != Success) {
+        if (client)
+            client->errorValue = rid;
+        *pClient = NULL;
+    }
+    DanStackDown;
     return rc;
 }
 

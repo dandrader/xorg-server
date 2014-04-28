@@ -1899,6 +1899,16 @@ int
 GetTouchEvents(InternalEvent *events, DeviceIntPtr dev, uint32_t ddx_touchid,
                uint16_t type, uint32_t flags, const ValuatorMask *mask_in)
 {
+    DanStackUp;
+    if (flags & TOUCH_CLIENT_ID)
+    {
+        DanLog("touch %d\n", ddx_touchid);
+    }
+    else
+    {
+        DanLog("touch ddx id %d\n", ddx_touchid);
+    }
+
     ScreenPtr scr = dev->spriteInfo->sprite->hotPhys.pScreen;
     TouchClassPtr t = dev->touch;
     ValuatorClassPtr v = dev->valuator;
@@ -1925,7 +1935,7 @@ GetTouchEvents(InternalEvent *events, DeviceIntPtr dev, uint32_t ddx_touchid,
 #endif
 
     if (!dev->enabled || !t || !v)
-        return 0;
+        goto FAILED;
 
     /* Find and/or create the DDX touch info */
 
@@ -1933,7 +1943,7 @@ GetTouchEvents(InternalEvent *events, DeviceIntPtr dev, uint32_t ddx_touchid,
     if (!ti) {
         ErrorFSigSafe("[dix] %s: unable to %s touch point %u\n", dev->name,
                       type == XI_TouchBegin ? "begin" : "find", ddx_touchid);
-        return 0;
+        goto FAILED;
     }
     client_id = ti->client_id;
 
@@ -1967,7 +1977,7 @@ GetTouchEvents(InternalEvent *events, DeviceIntPtr dev, uint32_t ddx_touchid,
             !valuator_mask_isset(mask_in, 1)) {
             ErrorFSigSafe("%s: Attempted to start touch without x/y "
                           "(driver bug)\n", dev->name);
-            return 0;
+            goto FAILED;
         }
         break;
     case XI_TouchUpdate:
@@ -1984,7 +1994,7 @@ GetTouchEvents(InternalEvent *events, DeviceIntPtr dev, uint32_t ddx_touchid,
         TouchEndDDXTouch(dev, ti);
         break;
     default:
-        return 0;
+        goto FAILED;
     }
 
     /* Get our screen event co-ordinates (root_x/root_y/event_x/event_y):
@@ -2058,6 +2068,11 @@ GetTouchEvents(InternalEvent *events, DeviceIntPtr dev, uint32_t ddx_touchid,
             v->axisVal[i] = valuator_mask_get(&mask, i);
     }
 
+    goto SUCCEEDED;
+    FAILED:
+    num_events = 0;
+    SUCCEEDED:
+    DanStackDown;
     return num_events;
 }
 

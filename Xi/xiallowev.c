@@ -73,6 +73,8 @@ ProcXIAllowEvents(ClientPtr client)
 
     REQUEST(xXI2_2AllowEventsReq);
 
+    DanStackUp;
+
     xi_client = dixLookupPrivate(&client->devPrivates, XIClientPrivateKey);
 
     if (version_compare(xi_client->major_version,
@@ -86,7 +88,7 @@ ProcXIAllowEvents(ClientPtr client)
 
     ret = dixLookupDevice(&dev, stuff->deviceid, client, DixGetAttrAccess);
     if (ret != Success)
-        return ret;
+        goto EXIT;
 
     time = ClientTimeToServerTime(stuff->time);
 
@@ -118,12 +120,23 @@ ProcXIAllowEvents(ClientPtr client)
         int rc;
         WindowPtr win;
 
+        if (stuff->mode == XIAcceptTouch)
+            {DanLog("XIAcceptTouch touch %d\n", stuff->touchid);}
+        else
+            {DanLog("XIRejectTouch touch %d\n", stuff->touchid);}
+
         if (!have_xi22)
-            return BadValue;
+        {
+            ret = BadValue;
+            goto EXIT;
+        }
 
         rc = dixLookupWindow(&win, stuff->grab_window, client, DixReadAccess);
         if (rc != Success)
-            return rc;
+        {
+            ret = rc;
+            goto EXIT;
+        }
 
         ret = TouchAcceptReject(client, dev, stuff->mode, stuff->touchid,
                                 stuff->grab_window, &client->errorValue);
@@ -134,5 +147,7 @@ ProcXIAllowEvents(ClientPtr client)
         ret = BadValue;
     }
 
+    EXIT:
+    DanStackDown;
     return ret;
 }

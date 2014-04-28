@@ -153,6 +153,13 @@ ProcXIUngrabDevice(ClientPtr client)
     if (ret != Success)
         return ret;
 
+    DanStackUp;
+    {
+        char buffer[500];
+        DanPrintGrabInfo(buffer, &(dev->deviceGrab));
+        DanLog("device id %d, which has %s\n", dev->id, buffer);
+    }
+
     grab = dev->deviceGrab.grab;
 
     time = ClientTimeToServerTime(stuff->time);
@@ -161,6 +168,7 @@ ProcXIUngrabDevice(ClientPtr client)
         (grab) && SameClient(grab, client) && grab->grabtype == XI2)
         (*dev->deviceGrab.DeactivateGrab) (dev);
 
+    DanStackDown;
     return Success;
 }
 
